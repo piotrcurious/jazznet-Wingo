@@ -1,0 +1,7 @@
+patterns/
+__pycache__/
+*.mid
+tests/runner
+tests/gui_bridge
+EV_PWM/tests/runner
+EV_PWM/tests/gui_bridge
