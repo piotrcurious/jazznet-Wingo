@@ -43,12 +43,12 @@ const char* chordNames[] = {"ii", "V", "I", "IV", "vi", "iii"};
 // Markov transition matrix (simplified)
 // Rows: current chord, Cols: next chord probabilities (scaled to 100)
 static const int transitionMatrix[6][6] = {
-  { 5, 70,  5,  5,  5, 10}, // ii -> V (strong), iii, vi
-  { 5,  5, 70,  5, 10,  5}, // V  -> I (strong), vi
-  {10, 10,  5, 20, 30, 25}, // I  -> IV, vi, iii
-  {20, 30, 10,  5, 10, 25}, // IV -> V, ii, iii
-  {50, 10,  5, 10,  5, 20}, // vi -> ii, iii
-  {10, 10,  5, 10, 60,  5}  // iii-> vi
+  { 0, 80,  0,  0, 10, 10}, // ii -> V (strong), vi, iii
+  { 0,  0, 80,  0, 15,  5}, // V  -> I (strong), vi, iii
+  { 5,  5,  0, 40, 25, 25}, // I  -> IV, vi, iii
+  {15, 60,  5,  0,  5, 15}, // IV -> V (strong), ii, iii
+  {60,  5,  0, 15,  0, 20}, // vi -> ii (strong), iii, IV
+  {10, 10,  0, 10, 70,  0}  // iii-> vi (strong), ii, V, IV
 };
 
 static int currentChordIdx = 2; // Start on I
@@ -255,16 +255,15 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
   }
 
   // Markov-based chord selection
-  // The error value influences how "surprising" (entropic) the next chord is.
+  // The error value and speed influence how "surprising" (entropic) the next chord is.
   int nextChordIdx = currentChordIdx;
   int r = random(0, 100);
   int cumulative = 0;
 
-  // Entropy injection: if error is high, we deviate from the most likely transition
-  if (context.error > ERROR_THRESHOLD_3) {
-      // Increase entropy based on error
-      int entropy = map(context.error, ERROR_THRESHOLD_3, 127, 0, 50);
-      r = (r + entropy) % 100;
+  // Entropy injection: high error or high speed increases entropy (musical tension)
+  int tension = map(context.error, 0, 127, 0, 30) + map(context.speed, 0, 127, 0, 20);
+  if (tension > 20) {
+      r = (r + tension) % 100;
   }
 
   bool found = false;
@@ -277,7 +276,7 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
     }
   }
 
-  // Fallback (should not happen with good transition matrix)
+  // Fallback
   if (!found) nextChordIdx = random(0, 6);
 
   chord1Def = allChords[currentChordIdx];
@@ -288,16 +287,18 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
   // Use lat/lon to seed a local variations
   long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
 
-  // Jazznet pattern integration: try to load a pattern based on location
-  int jazznetNotes[16];
+  // Jazznet pattern integration: try to load a pattern based on location and telemetry
+  int jazznetNotes[32];
   int jazznetSize = 0;
   bool useJazznet = false;
 
-  if (context.satellites >= 6) { // Only use Jazznet if we have good GPS
+  // Select pattern based on location, but also use speed to vary it
+  int patternIdx = (geoSeed + (context.speed / 10)) % 100;
+
+  if (context.satellites >= 4) { // Slightly lower requirement for GPS
       char filename[32];
-      // Use lat/lon to pick a file: /jazznet/P<seed>.CSV
-      snprintf(filename, sizeof(filename), "jazznet/P%ld.CSV", geoSeed % 100);
-      if (loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 16)) {
+      snprintf(filename, sizeof(filename), "jazznet/P%d.CSV", patternIdx);
+      if (loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32)) {
           useJazznet = true;
       }
   }
@@ -349,25 +350,40 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
       }
   };
 
-  if (useJazznet && jazznetSize >= 4) {
-      // Familiarity: play the pattern as is or with variations
-      playVariedChord(jazznetNotes, jazznetSize > 4 ? 4 : jazznetSize, transpositionOffset, velocity);
+  if (useJazznet && jazznetSize > 0) {
+      // Iterate through the entire pattern in 4-note segments (chords)
+      for (int offset = 0; offset < jazznetSize; offset += 4) {
+          int currentSegmentSize = (jazznetSize - offset > 4) ? 4 : (jazznetSize - offset);
+
+          // Adjust velocity for subsequent segments based on trend
+          int currentVelocity = (offset == 0) ? velocity : constrain(velocity + trend * 5, 30, 127);
+
+          playVariedChord(jazznetNotes + offset, currentSegmentSize, transpositionOffset, currentVelocity);
+
+          visualFeedback(offset == 0 ? 255 : 128);
+
+          // Add syncopation to the last segment if applicable
+          int currentDelay = actualDelay;
+          if (offset + 4 >= jazznetSize) {
+              currentDelay += syncopation;
+          }
+
+          delay(currentDelay);
+
+          // Stop if braking hard during the pattern
+          if (context.brake > 90) break;
+      }
   } else {
       playVariedChord(chord1Def, chord1Size, transpositionOffset, velocity);
-  }
-  visualFeedback(255);
-  delay(actualDelay);
+      visualFeedback(255);
+      delay(actualDelay);
 
-  // If braking hard, maybe don't play the second chord or play it very softly
-  if (context.brake < 100) {
-    int velocity2 = constrain(velocity + trend * 10, 30, 127);
-    if (useJazznet && jazznetSize >= 8) {
-        playVariedChord(jazznetNotes + 4, (jazznetSize - 4) > 4 ? 4 : (jazznetSize - 4), transpositionOffset, velocity2);
-    } else {
+      if (context.brake < 100) {
+        int velocity2 = constrain(velocity + trend * 10, 30, 127);
         playVariedChord(chord2Def, chord2Size, transpositionOffset, velocity2);
-    }
-    visualFeedback(128);
-  delay(actualDelay + syncopation);
+        visualFeedback(128);
+        delay(actualDelay + syncopation);
+      }
   }
 
   stopLastPlayedNotes();
