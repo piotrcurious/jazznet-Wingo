@@ -324,7 +324,8 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
 
   auto playVariedChord = [&](const int* baseChord, int size, int trans, int vel) {
       int variedChord[MAX_NOTES_PER_CHORD];
-      for (int i = 0; i < size && i < MAX_NOTES_PER_CHORD; ++i) {
+      int count = 0;
+      for (int i = 0; i < size && count < MAX_NOTES_PER_CHORD; ++i) {
           int note = baseChord[i];
           if (random(0, 100) < noveltyFactor) {
               // Substitute or add color
@@ -333,9 +334,19 @@ void playChordProgression(const EVContext& context, int currentBaseNote) {
               else if (choice == 1) note += 5; // Add an 11th
               else note += 9; // Add a 13th
           }
-          variedChord[i] = note;
+          variedChord[count++] = note;
       }
-      sendChord(variedChord, size, trans, vel);
+
+      // If error is very high, arpeggiate instead of playing a block chord
+      if (context.error > ERROR_THRESHOLD_4) {
+          int arpDelay = actualDelay / (count > 0 ? count : 1);
+          for (int i = 0; i < count; ++i) {
+              sendChord(&variedChord[i], 1, trans, vel);
+              delay(arpDelay);
+          }
+      } else {
+          sendChord(variedChord, count, trans, vel);
+      }
   };
 
   if (useJazznet && jazznetSize >= 4) {
