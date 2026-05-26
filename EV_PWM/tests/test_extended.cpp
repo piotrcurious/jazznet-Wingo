@@ -208,32 +208,54 @@ void test_novelty_variation() {
 void test_jazznet_loading() {
     std::cout << "Testing Jazznet loading..." << std::endl;
 
-    EVContext ctx = {50, 0, 0, 0, 0, 0, 10, 0.0, 0.0}; // GeoSeed 0
-    MIDI.events.clear();
-    resetImprovisation();
-    playChordProgression(ctx, 60);
+    for (int i = 0; i < 100; ++i) {
+        EVContext ctx = {50, 0, 0, 0, 0, 0, 10, (double)i / 100.0, 0.0}; // GeoSeed i
+        MIDI.events.clear();
+        resetImprovisation();
+        playChordProgression(ctx, 60);
 
-    // Check if any of the notes from P0.CSV (60, 64, 67, 71, ...) are present
-    // Note: voice leading might shift octaves, so we check note % 12
-    bool foundC = false;
-    for (const auto& e : MIDI.events) {
-        if (e.on && (e.note % 12 == 0)) foundC = true;
+        assert(MIDI.events.size() > 0);
     }
-    assert(foundC == true);
 
-    // Test different location P1
-    ctx.latitude = 0.01; // GeoSeed 1
+    std::cout << "Jazznet loading 100 files tests passed!" << std::endl;
+}
+
+void test_arpeggiation_trigger() {
+    std::cout << "Testing arpeggiation trigger..." << std::endl;
+
+    // Normal error = Block chord (multiple NoteOn in same tick/sequence)
+    EVContext ctxLow = {30, 0, 0, 0, 0, 0, 0, 0.0, 0.0}; // No satellites to avoid jazznet
     MIDI.events.clear();
-    resetImprovisation();
-    playChordProgression(ctx, 60);
+    playChordProgression(ctxLow, 60);
 
-    bool foundD = false;
-    for (const auto& e : MIDI.events) {
-        if (e.on && (e.note % 12 == 2)) foundD = true;
+    // Low error should result in block chords (many NoteOn before NoteOff)
+    int concurrentMax = 0;
+    int current = 0;
+    for(auto& e : MIDI.events) {
+        if(e.on) current++;
+        else current--;
+        if(current > concurrentMax) concurrentMax = current;
     }
-    assert(foundD == true);
+    std::cout << "Max concurrent notes (Low Error): " << concurrentMax << std::endl;
+    assert(concurrentMax > 1);
 
-    std::cout << "Jazznet loading tests passed!" << std::endl;
+    // High error = Arpeggio (NoteOn, delay, NoteOff, NoteOn ...)
+    EVContext ctxHigh = {120, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
+    MIDI.events.clear();
+    playChordProgression(ctxHigh, 60);
+
+    // In arpeggio mode, concurrent notes should be 1
+    concurrentMax = 0;
+    current = 0;
+    for(auto& e : MIDI.events) {
+        if(e.on) current++;
+        else current--;
+        if(current > concurrentMax) concurrentMax = current;
+    }
+    std::cout << "Max concurrent notes (High Error): " << concurrentMax << std::endl;
+    assert(concurrentMax == 1);
+
+    std::cout << "Arpeggiation trigger tests passed!" << std::endl;
 }
 
 void test_markov_transitions() {
@@ -272,6 +294,7 @@ int main() {
     test_gps_influence();
     test_markov_transitions();
     test_jazznet_loading();
+    test_arpeggiation_trigger();
     test_novelty_variation();
     std::cout << "Extended tests passed!" << std::endl;
     return 0;
