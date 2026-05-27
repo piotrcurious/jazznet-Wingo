@@ -84,13 +84,16 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
     int cumulative = 0;
 
     // Influence from ensemble: tendency to gravitate towards peers' chords
+    // "Leadership" dynamics: peers with higher intensity have more influence.
     int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
     if (ensemble.peerCount > 0) {
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
-                    ensembleInfluence[peerChord] += 15;
+                    // Base influence 10, plus up to 20 based on peer intensity (leadership)
+                    int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 20);
+                    ensembleInfluence[peerChord] += (10 + leadership);
                 }
             }
         }
@@ -101,16 +104,20 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
         r = (r + entropy) % 100;
     }
 
+    int totalWeight = 0;
+    for (int i = 0; i < 6; ++i) {
+        totalWeight += transitionMatrix[currentChordIdx][i] + ensembleInfluence[i];
+    }
+    r = random(0, totalWeight);
+
     bool found = false;
     for (int i = 0; i < 6; ++i) {
         int weight = transitionMatrix[currentChordIdx][i] + ensembleInfluence[i];
         cumulative += weight;
-        if (r < cumulative || (i == 5 && !found)) { // Ensure fallback if r is large due to weights
-            if (r < cumulative) {
-                nextChordIdx = i;
-                found = true;
-                break;
-            }
+        if (r < cumulative) {
+            nextChordIdx = i;
+            found = true;
+            break;
         }
     }
     if (!found) nextChordIdx = random(0, 6);
@@ -188,6 +195,16 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     // Blend ensemble intensity
     if (ensemble.peerCount > 0) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
+
+        // Basic Call and Response:
+        // If collective intensity is high, occasionally "listen" (reduce our own density)
+        if (ep.energeticIntensity > 80 && random(0, 100) < 30) {
+            ensemble.inCallAndResponse = true;
+        } else {
+            ensemble.inCallAndResponse = false;
+        }
+    } else {
+        ensemble.inCallAndResponse = false;
     }
 
     long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
@@ -198,7 +215,21 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     bool useJazznet = false;
 
     char filename[128];
-    snprintf(filename, sizeof(filename), "jazznet/P%d.CSV", patternIdx);
+    const char* typeStr = "chord";
+    const char* modeStr = "maj7-chord";
+
+    if (pp.perceivedDissonance > 75) {
+        typeStr = "scale";
+        modeStr = "locrian";
+    } else if (pp.perceivedDissonance > 50) {
+        typeStr = "arpeggio";
+        modeStr = "min7-arpeggio";
+    } else if (tp.harmonyTension > 60) {
+        typeStr = "chord";
+        modeStr = "seventh-chord";
+    }
+
+    snprintf(filename, sizeof(filename), "jazznet/%s/%s/C-4-%s-0_0.CSV", typeStr, modeStr, modeStr);
 
     if (context.satellites >= 3) {
         loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32);
@@ -243,6 +274,8 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     if (useJazznet) {
         for (int offset = 0; offset < jazznetSize; offset += 4) {
+            if (ensemble.inCallAndResponse && offset > 0 && random(0,100) < 70) continue; // Skip notes in "listen" mode
+
             int currentSegmentSize = (jazznetSize - offset > 4) ? 4 : (jazznetSize - offset);
             int currentVelocity = (offset == 0) ? velocity : constrain(velocity + psycho.trend * 5, 30, 127);
             playVariedChordLocal(jazznetNotes + offset, currentSegmentSize, transpositionOffset, currentVelocity, novelty);
