@@ -43,21 +43,21 @@ const char* chordNames[] = {"ii", "V", "I", "IV", "vi", "iii"};
 // Markov transition matrix (simplified)
 // Rows: current chord, Cols: next chord probabilities (scaled to 100)
 static const int transitionMatrix[6][6] = {
-  { 0, 80,  0,  0, 10, 10}, // ii -> V (strong), vi, iii
-  { 0,  0, 80,  0, 15,  5}, // V  -> I (strong), vi, iii
-  { 5,  5,  0, 40, 25, 25}, // I  -> IV, vi, iii
-  {15, 60,  5,  0,  5, 15}, // IV -> V (strong), ii, iii
-  {60,  5,  0, 15,  0, 20}, // vi -> ii (strong), iii, IV
-  {10, 10,  0, 10, 70,  0}  // iii-> vi (strong), ii, V, IV
+  { 5, 70,  5,  5,  5, 10}, // ii -> V (strong), iii, vi
+  { 5,  5, 70,  5, 10,  5}, // V  -> I (strong), vi
+  {10, 10,  5, 20, 30, 25}, // I  -> IV, vi, iii
+  {20, 30, 10,  5, 10, 25}, // IV -> V, ii, iii
+  {50, 10,  5, 10,  5, 20}, // vi -> ii, iii
+  {10, 10,  5, 10, 60,  5}  // iii-> vi
 };
 
-static int currentChordIdx = 2; // Start on I
+static CorrelationEngine engine = {{2}, {0, 0}};
 
 void resetImprovisation() {
-    currentChordIdx = 2;
+    engine.theory.currentChordIdx = 2;
+    engine.psycho.previousError = 0;
+    engine.psycho.trend = 0;
     lastTargetNotesCount = 0;
-    predictionState = 0;
-    trend = 0;
 }
 
 bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
@@ -74,40 +74,155 @@ bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
   return false;
 }
 
-int predictError(int currentError) {
-  // Simple trend analysis: if error is increasing, assume it will continue.
-  // We use predictionState to add some hysteresis to the trend detection.
-  switch (predictionState) {
-    case 0: // Stable
-      if (currentError > previousError) {
-        trend = 1;
-        predictionState = 1; // Increasing
-      } else if (currentError < previousError) {
-        trend = -1;
-        predictionState = 2; // Decreasing
-      }
-      break;
-    case 1: // Increasing
-      if (currentError < previousError) {
-        predictionState = 0; // Became unstable, reset to stable and see next time
-        trend = 0;
-      }
-      break;
-    case 2: // Decreasing
-      if (currentError > previousError) {
-        predictionState = 0; // Became unstable
-        trend = 0;
-      }
-      break;
-  }
+TheoryPrediction TheoryPredictor::predict(const EVContext& context) {
+    int nextChordIdx = currentChordIdx;
+    int r = random(0, 100);
+    int cumulative = 0;
 
-  int randomFactor = random(-2, 3);
-  // Add some "momentum" to the prediction based on the trend
-  int predictedError = currentError + trend * 3 + randomFactor;
-  predictedError = constrain(predictedError, 0, 127);
+    int entropy = map(context.speed, 0, 127, 0, 40) + map(context.altitude % 1000, 0, 999, 0, 30);
+    if (entropy > 20) {
+        r = (r + entropy) % 100;
+    }
 
-  previousError = currentError;
-  return predictedError;
+    bool found = false;
+    for (int i = 0; i < 6; ++i) {
+        cumulative += transitionMatrix[currentChordIdx][i];
+        if (r < cumulative) {
+            nextChordIdx = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) nextChordIdx = random(0, 6);
+
+    int tensions[] = {50, 90, 10, 40, 70, 30};
+    int harmonyTension = tensions[nextChordIdx];
+    if (context.speed > 90 && (nextChordIdx == 2 || nextChordIdx == 5)) {
+        harmonyTension += 30;
+    }
+
+    return {nextChordIdx, harmonyTension};
+}
+
+PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& context) {
+    int currentTotalStress = (context.error + context.speed / 2);
+    int stressDiff = currentTotalStress - previousError;
+
+    if (stressDiff > 15) trend = 2;
+    else if (stressDiff > 0) trend = 1;
+    else if (stressDiff < -15) trend = -2;
+    else if (stressDiff < 0) trend = -1;
+    else trend = 0;
+
+    int dissonance = map(context.error, 0, 127, 0, 70);
+    if (context.speed > 80) dissonance += map(context.speed, 80, 127, 0, 30);
+
+    int intensity = map(context.throttle, 0, 127, 30, 100);
+    if (context.brake > 10) {
+        intensity -= map(context.brake, 10, 127, 0, 80);
+    }
+
+    int jitter = 0;
+    if (context.satellites < 5) jitter += map(5 - context.satellites, 0, 5, 0, 50);
+    if (context.speed > 110) jitter += map(context.speed, 110, 127, 0, 30);
+
+    previousError = currentTotalStress;
+    return {constrain(dissonance, 0, 100), constrain(intensity, 0, 100), constrain(jitter, 0, 100)};
+}
+
+void CorrelationEngine::process(const EVContext& context, int baseNote) {
+    TheoryPrediction tp = theory.predict(context);
+    PsychoacousticPrediction pp = psycho.predict(context);
+    theory.currentChordIdx = tp.nextChordIdx;
+
+    long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
+    int patternIdx = (geoSeed + (context.speed / 10)) % 100;
+
+    int jazznetNotes[32];
+    int jazznetSize = 0;
+    bool useJazznet = false;
+
+    char filename[128];
+    const char* typeStr = "chord";
+    const char* modeStr = "maj7-chord";
+
+    if (pp.perceivedDissonance > 75) {
+        typeStr = "scale";
+        modeStr = "locrian";
+    } else if (pp.perceivedDissonance > 50) {
+        typeStr = "arpeggio";
+        modeStr = "min7-arpeggio";
+    } else if (tp.harmonyTension > 60) {
+        typeStr = "chord";
+        modeStr = "seventh-chord";
+    }
+
+    snprintf(filename, sizeof(filename), "jazznet/%s/%s/C-4-%s-0_0.CSV", typeStr, modeStr, modeStr);
+
+    if (context.satellites >= 3) {
+        loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32);
+        useJazznet = (jazznetSize > 0);
+    }
+
+    int headingOffset = map(context.heading % 360, 0, 359, 0, 11);
+    int altitudeOffset = (context.altitude / 100);
+    int speedOffset = map(context.speed, 0, 127, -12, 12);
+    int transpositionOffset = (baseNote - 60) + headingOffset + altitudeOffset + speedOffset;
+
+    int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
+    int actualDelay = map(100 - pp.energeticIntensity, 0, 100, 200, 800);
+    int syncopation = map(pp.rhythmicJitter, 0, 100, 0, actualDelay / 3);
+
+    auto playVariedChordLocal = [&](const int* baseChord, int size, int trans, int vel, int novelty) {
+        int variedChord[MAX_NOTES_PER_CHORD];
+        int count = 0;
+        for (int i = 0; i < size && count < MAX_NOTES_PER_CHORD; ++i) {
+            int note = baseChord[i];
+            if (random(0, 100) < novelty) {
+                int choice = random(0, 3);
+                if (choice == 0) note += 2;
+                else if (choice == 1) note += 5;
+                else note += 9;
+            }
+            variedChord[count++] = note;
+        }
+
+        if (pp.perceivedDissonance > 80) {
+            int arpDelay = actualDelay / (count > 0 ? count : 1);
+            for (int i = 0; i < count; ++i) {
+                sendChord(&variedChord[i], 1, trans, vel);
+                delay(arpDelay);
+            }
+        } else {
+            sendChord(variedChord, count, trans, vel);
+        }
+    };
+
+    int novelty = (pp.perceivedDissonance + tp.harmonyTension) / 2;
+
+    if (useJazznet) {
+        for (int offset = 0; offset < jazznetSize; offset += 4) {
+            int currentSegmentSize = (jazznetSize - offset > 4) ? 4 : (jazznetSize - offset);
+            int currentVelocity = (offset == 0) ? velocity : constrain(velocity + psycho.trend * 5, 30, 127);
+            playVariedChordLocal(jazznetNotes + offset, currentSegmentSize, transpositionOffset, currentVelocity, novelty);
+            visualFeedback(offset == 0 ? 255 : 128);
+            delay(actualDelay + (offset + 4 >= jazznetSize ? syncopation : 0));
+            if (context.brake > 90) break;
+        }
+    } else {
+        playVariedChordLocal(allChords[tp.nextChordIdx], 4, transpositionOffset, velocity, novelty);
+        visualFeedback(255);
+        delay(actualDelay);
+        if (context.brake < 100) {
+            int nextIdx = (tp.nextChordIdx + 1) % 6;
+            playVariedChordLocal(allChords[nextIdx], 4, transpositionOffset, velocity, novelty);
+            visualFeedback(128);
+            delay(actualDelay + syncopation);
+        }
+    }
+
+    stopLastPlayedNotes();
+    visualFeedback(0);
 }
 
 void sendMIDINoteOnWrapper(int note, int velocity) {
@@ -230,164 +345,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 }
 
 void playChordProgression(const EVContext& context, int currentBaseNote) {
-  const int* chord1Def;
-  const int* chord2Def;
-  int chord1Size = 4;
-  int chord2Size = 4;
-
-  // Heading influences the "mode" or transposition offset
-  int headingOffset = map(context.heading % 360, 0, 359, 0, 11);
-
-  // Altitude shifts the overall register
-  int altitudeOffset = (context.altitude / 100);
-
-  // Base transposition offset
-  int transpositionOffset = (currentBaseNote - 60) + headingOffset + altitudeOffset;
-
-  // Speed influences the register (octave)
-  int speedOffset = map(context.speed, 0, 127, -12, 12);
-  transpositionOffset += speedOffset;
-
-  // Signal quality (satellites) adds musical jitter/instability
-  int jitter = 0;
-  if (context.satellites < 6) {
-    jitter = random(-5, 6);
-  }
-
-  // Markov-based chord selection
-  // The error value and speed influence how "surprising" (entropic) the next chord is.
-  int nextChordIdx = currentChordIdx;
-  int r = random(0, 100);
-  int cumulative = 0;
-
-  // Entropy injection: high error or high speed increases entropy (musical tension)
-  int tension = map(context.error, 0, 127, 0, 30) + map(context.speed, 0, 127, 0, 20);
-  if (tension > 20) {
-      r = (r + tension) % 100;
-  }
-
-  bool found = false;
-  for (int i = 0; i < 6; ++i) {
-    cumulative += transitionMatrix[currentChordIdx][i];
-    if (r < cumulative) {
-      nextChordIdx = i;
-      found = true;
-      break;
-    }
-  }
-
-  // Fallback
-  if (!found) nextChordIdx = random(0, 6);
-
-  chord1Def = allChords[currentChordIdx];
-  chord2Def = allChords[nextChordIdx];
-  currentChordIdx = nextChordIdx;
-
-  // Geospatial location for "recurring themes"
-  // Use lat/lon to seed a local variations
-  long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
-
-  // Jazznet pattern integration: try to load a pattern based on location and telemetry
-  int jazznetNotes[32];
-  int jazznetSize = 0;
-  bool useJazznet = false;
-
-  // Select pattern based on location, but also use speed to vary it
-  int patternIdx = (geoSeed + (context.speed / 10)) % 100;
-
-  if (context.satellites >= 4) { // Slightly lower requirement for GPS
-      char filename[32];
-      snprintf(filename, sizeof(filename), "jazznet/P%d.CSV", patternIdx);
-      if (loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32)) {
-          useJazznet = true;
-      }
-  }
-
-  // Velocity influenced by throttle and error, but dampened by brake
-  // Signal jitter also affects velocity
-  int baseVelocity = map(context.error, 0, 127, 40, 80) + map(context.throttle, 0, 127, 0, 40) + jitter;
-  int velocity = constrain(baseVelocity - map(context.brake, 0, 127, 0, 50), 30, 120);
-
-  // Rhythm (delay) influenced by speed and error, slowed down by brake
-  // Jitter affects timing slightly
-  int baseDelay = map(context.error, 0, 127, 500, 200) - map(context.speed, 0, 127, 0, 100) + (jitter * 5);
-  int actualDelay = constrain(baseDelay + map(context.brake, 0, 127, 0, 400), 100, 1000);
-
-  // Syncopation: shift the timing of the second chord based on throttle, speed, and satellites (jitter)
-  int syncopation = 0;
-  if (context.throttle > 70 || context.speed > 70 || context.satellites < 4) {
-      int maxSync = actualDelay / 3;
-      syncopation = random(-maxSync, maxSync);
-  }
-
-  // Novelty Factor: high error or low satellite count increases novelty
-  int noveltyFactor = constrain(map(context.error, 0, 127, 0, 50) + map(12 - context.satellites, 0, 12, 0, 50), 0, 100);
-
-  auto playVariedChord = [&](const int* baseChord, int size, int trans, int vel) {
-      int variedChord[MAX_NOTES_PER_CHORD];
-      int count = 0;
-      for (int i = 0; i < size && count < MAX_NOTES_PER_CHORD; ++i) {
-          int note = baseChord[i];
-          if (random(0, 100) < noveltyFactor) {
-              // Substitute or add color
-              int choice = random(0, 3);
-              if (choice == 0) note += 2;  // Add a 9th
-              else if (choice == 1) note += 5; // Add an 11th
-              else note += 9; // Add a 13th
-          }
-          variedChord[count++] = note;
-      }
-
-      // If error is very high, arpeggiate instead of playing a block chord
-      if (context.error > ERROR_THRESHOLD_4) {
-          int arpDelay = actualDelay / (count > 0 ? count : 1);
-          for (int i = 0; i < count; ++i) {
-              sendChord(&variedChord[i], 1, trans, vel);
-              delay(arpDelay);
-          }
-      } else {
-          sendChord(variedChord, count, trans, vel);
-      }
-  };
-
-  if (useJazznet && jazznetSize > 0) {
-      // Iterate through the entire pattern in 4-note segments (chords)
-      for (int offset = 0; offset < jazznetSize; offset += 4) {
-          int currentSegmentSize = (jazznetSize - offset > 4) ? 4 : (jazznetSize - offset);
-
-          // Adjust velocity for subsequent segments based on trend
-          int currentVelocity = (offset == 0) ? velocity : constrain(velocity + trend * 5, 30, 127);
-
-          playVariedChord(jazznetNotes + offset, currentSegmentSize, transpositionOffset, currentVelocity);
-
-          visualFeedback(offset == 0 ? 255 : 128);
-
-          // Add syncopation to the last segment if applicable
-          int currentDelay = actualDelay;
-          if (offset + 4 >= jazznetSize) {
-              currentDelay += syncopation;
-          }
-
-          delay(currentDelay);
-
-          // Stop if braking hard during the pattern
-          if (context.brake > 90) break;
-      }
-  } else {
-      playVariedChord(chord1Def, chord1Size, transpositionOffset, velocity);
-      visualFeedback(255);
-      delay(actualDelay);
-
-      if (context.brake < 100) {
-        int velocity2 = constrain(velocity + trend * 10, 30, 127);
-        playVariedChord(chord2Def, chord2Size, transpositionOffset, velocity2);
-        visualFeedback(128);
-        delay(actualDelay + syncopation);
-      }
-  }
-
-  stopLastPlayedNotes();
-  visualFeedback(0);
+  engine.process(context, currentBaseNote);
 }
 
 void visualFeedback(int intensity) {

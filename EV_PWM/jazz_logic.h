@@ -44,6 +44,36 @@ struct EVContext {
     double longitude;
 };
 
+// Predictors and Engine
+struct TheoryPrediction {
+    int nextChordIdx;
+    int harmonyTension; // 0-100
+};
+
+struct PsychoacousticPrediction {
+    int perceivedDissonance; // 0-100
+    int energeticIntensity;  // 0-100
+    int rhythmicJitter;      // 0-100
+};
+
+struct TheoryPredictor {
+    int currentChordIdx;
+    TheoryPrediction predict(const EVContext& context);
+};
+
+struct PsychoacousticPredictor {
+    int previousError;
+    int trend;
+    PsychoacousticPrediction predict(const EVContext& context);
+};
+
+struct CorrelationEngine {
+    TheoryPredictor theory;
+    PsychoacousticPredictor psycho;
+
+    void process(const EVContext& context, int baseNote);
+};
+
 // Functions
 bool isDissonant(int note, const int* contextNotes, int contextNotesCount);
 int predictError(int currentError);
@@ -54,5 +84,6 @@ void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
 void sendMIDINoteOffWrapper(int note);
 void visualFeedback(int intensity);
+void stopLastPlayedNotes();
 
 #endif
