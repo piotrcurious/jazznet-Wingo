@@ -16,12 +16,14 @@ void test_isDissonant() {
 }
 
 void test_predictError() {
-    std::cout << "Testing predictError..." << std::endl;
-    predictError(50);
-    predictError(60);
-    int pred = predictError(70);
-    assert(pred >= 70 && pred <= 75);
-    std::cout << "predictError tests passed!" << std::endl;
+    std::cout << "Testing predictError (Psychoacoustic Predictor Transition)..." << std::endl;
+    PsychoacousticPredictor p = {0, 0};
+    EVContext ctx = {50, 0, 0, 0, 0, 0, 10, 0.0, 0.0};
+    p.predict(ctx);
+    ctx.error = 60;
+    p.predict(ctx);
+    assert(p.trend > 0);
+    std::cout << "Predictor transition tests passed!" << std::endl;
 }
 
 void run_progression_recording(const std::string& filename) {
