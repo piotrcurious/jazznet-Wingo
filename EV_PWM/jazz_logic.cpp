@@ -85,15 +85,22 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
 
     // Influence from ensemble: tendency to gravitate towards peers' chords
     // "Leadership" dynamics: peers with higher intensity have more influence.
+    // "Harmonic Mimicry": peers also influence related chords (dominant/subdominant).
     int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
     if (ensemble.peerCount > 0) {
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
-                    // Base influence 10, plus up to 20 based on peer intensity (leadership)
                     int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 20);
-                    ensembleInfluence[peerChord] += (10 + leadership);
+                    int baseWeight = 10 + leadership;
+                    ensembleInfluence[peerChord] += baseWeight;
+
+                    // Mimicry: small influence on related chords (simplified)
+                    int dominant = (peerChord + 1) % 6;
+                    int subdominant = (peerChord + 5) % 6;
+                    ensembleInfluence[dominant] += baseWeight / 3;
+                    ensembleInfluence[subdominant] += baseWeight / 3;
                 }
             }
         }
@@ -199,15 +206,20 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
         pp.perceivedDissonance = (pp.perceivedDissonance * 8 + ep.perceivedDissonance * 2) / 10;
 
-        // Basic Call and Response:
-        // If collective intensity is high, occasionally "listen" (reduce our own density)
-        if (ep.energeticIntensity > 80 && random(0, 100) < 30) {
-            ensemble.inCallAndResponse = true;
+        // Stateful Call and Response
+        if (ensemble.callAndResponseTicks > 0) {
+            ensemble.callAndResponseTicks--;
         } else {
-            ensemble.inCallAndResponse = false;
+            if (ep.energeticIntensity > 85 && random(0, 100) < 20) {
+                ensemble.inCallAndResponse = true;
+                ensemble.callAndResponseTicks = 4; // Stay in mode for 4 iterations
+            } else {
+                ensemble.inCallAndResponse = false;
+            }
         }
     } else {
         ensemble.inCallAndResponse = false;
+        ensemble.callAndResponseTicks = 0;
     }
 
     long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
@@ -245,7 +257,14 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     int transpositionOffset = (baseNote - 60) + headingOffset + altitudeOffset + speedOffset;
 
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
-    int actualDelay = map(100 - pp.energeticIntensity, 0, 100, 200, 800);
+    // Peer leadership influences local tempo
+    int tempoOffset = 0;
+    if (ensemble.peerCount > 0) {
+        int maxPeerSpeed = 0;
+        for(int i=0; i<4; i++) if(ensemble.peers[i].active && ensemble.peers[i].speed > maxPeerSpeed) maxPeerSpeed = ensemble.peers[i].speed;
+        tempoOffset = map(maxPeerSpeed, 0, 127, -50, 50);
+    }
+    int actualDelay = constrain(map(100 - pp.energeticIntensity, 0, 100, 200, 800) - tempoOffset, 100, 1200);
     int syncopation = map(pp.rhythmicJitter, 0, 100, 0, actualDelay / 3);
 
     auto playVariedChordLocal = [&](const int* baseChord, int size, int trans, int vel, int novelty) {
@@ -421,7 +440,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance) {
+void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed) {
     if (chordIdx < 0 || chordIdx >= 6) return; // Validation
 
     int slot = -1;
@@ -447,6 +466,7 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, in
         ensemble.peers[slot].currentChordIdx = chordIdx;
         ensemble.peers[slot].intensity = intensity;
         ensemble.peers[slot].dissonance = dissonance;
+        ensemble.peers[slot].speed = speed;
         ensemble.peers[slot].lastSeen = millis();
         ensemble.peers[slot].active = true;
     }
@@ -461,8 +481,8 @@ void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleCo
     engine.process(context, currentBaseNote);
 }
 
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance) {
-    engine.updatePeer(mac, chordIdx, intensity, dissonance);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed);
 }
 
 int getCurrentChordIdx() {

@@ -50,6 +50,7 @@ struct PeerState {
     int currentChordIdx;
     int intensity;
     int dissonance;
+    int speed;
     long lastSeen;
     bool active;
 };
@@ -59,6 +60,7 @@ struct EnsembleContext {
     int peerCount;
     int collectiveTension;
     bool inCallAndResponse;
+    int callAndResponseTicks;
 };
 
 // Predictors and Engine
@@ -95,7 +97,7 @@ struct CorrelationEngine {
     EnsembleContext ensemble;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance);
+    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed);
 };
 
 // Functions
@@ -105,7 +107,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize, int maxNotes);
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed);
 int getCurrentChordIdx();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
