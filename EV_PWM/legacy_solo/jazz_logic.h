@@ -44,22 +44,6 @@ struct EVContext {
     double longitude;
 };
 
-// Ensemble Dynamics
-struct PeerState {
-    uint8_t macAddr[6];
-    int currentChordIdx;
-    int intensity;
-    long lastSeen;
-    bool active;
-};
-
-struct EnsembleContext {
-    PeerState peers[4];
-    int peerCount;
-    int collectiveTension;
-    bool inCallAndResponse;
-};
-
 // Predictors and Engine
 struct TheoryPrediction {
     int nextChordIdx;
@@ -74,11 +58,7 @@ struct PsychoacousticPrediction {
 
 struct TheoryPredictor {
     int currentChordIdx;
-    TheoryPrediction predict(const EVContext& context, const EnsembleContext& ensemble);
-};
-
-struct EnsemblePredictor {
-    PsychoacousticPrediction predict(const EVContext& context, const EnsembleContext& ensemble);
+    TheoryPrediction predict(const EVContext& context);
 };
 
 struct PsychoacousticPredictor {
@@ -90,11 +70,8 @@ struct PsychoacousticPredictor {
 struct CorrelationEngine {
     TheoryPredictor theory;
     PsychoacousticPredictor psycho;
-    EnsemblePredictor ensemblePredictor;
-    EnsembleContext ensemble;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(uint8_t* mac, int chordIdx, int intensity);
 };
 
 // Functions
@@ -103,9 +80,6 @@ int predictError(int currentError);
 void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOffset, int velocity = 100);
 bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize, int maxNotes);
 void playChordProgression(const EVContext& context, int currentBaseNote);
-void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity);
-int getCurrentChordIdx();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
 void sendMIDINoteOffWrapper(int note);
