@@ -139,15 +139,17 @@ PsychoacousticPrediction EnsemblePredictor::predict(const EVContext& context, co
     for (int i = 0; i < 4; i++) {
         if (ensemble.peers[i].active) {
             collectiveIntensity += ensemble.peers[i].intensity;
+            collectiveDissonance += ensemble.peers[i].dissonance;
             activePeers++;
         }
     }
 
     if (activePeers > 0) {
         collectiveIntensity /= activePeers;
+        collectiveDissonance /= activePeers;
     }
 
-    return {0, collectiveIntensity, 0}; // Currently only influence intensity
+    return {collectiveDissonance, collectiveIntensity, 0};
 }
 
 PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& context) {
@@ -192,9 +194,10 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     theory.currentChordIdx = tp.nextChordIdx;
 
-    // Blend ensemble intensity
+    // Blend ensemble intensity and dissonance
     if (ensemble.peerCount > 0) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
+        pp.perceivedDissonance = (pp.perceivedDissonance * 8 + ep.perceivedDissonance * 2) / 10;
 
         // Basic Call and Response:
         // If collective intensity is high, occasionally "listen" (reduce our own density)
@@ -418,7 +421,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity) {
+void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance) {
     if (chordIdx < 0 || chordIdx >= 6) return; // Validation
 
     int slot = -1;
@@ -443,6 +446,7 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity) {
         memcpy(ensemble.peers[slot].macAddr, mac, 6);
         ensemble.peers[slot].currentChordIdx = chordIdx;
         ensemble.peers[slot].intensity = intensity;
+        ensemble.peers[slot].dissonance = dissonance;
         ensemble.peers[slot].lastSeen = millis();
         ensemble.peers[slot].active = true;
     }
@@ -457,8 +461,8 @@ void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleCo
     engine.process(context, currentBaseNote);
 }
 
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity) {
-    engine.updatePeer(mac, chordIdx, intensity);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance);
 }
 
 int getCurrentChordIdx() {

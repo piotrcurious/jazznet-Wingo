@@ -30,6 +30,7 @@ const int LED_PIN = 2; // Onboard LED for many ESP32 dev boards
 typedef struct struct_message {
     int currentChordIdx;
     int intensity;
+    int dissonance;
 } struct_message;
 
 struct_message myData;
@@ -37,7 +38,7 @@ struct_message myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     if (len == sizeof(struct_message)) {
         struct_message* msg = (struct_message*)incomingData;
-        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity);
+        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance);
     }
 }
 
@@ -76,6 +77,9 @@ void setup() {
   }
 }
 
+unsigned long lastBroadcastTime = 0;
+const unsigned long broadcastInterval = 100; // 10Hz broadcast
+
 void loop() {
   int sensorValue = analogRead(ANALOG_PIN_ERROR);
   int currentError = map(sensorValue, 0, ADC_RESOLUTION, 0, 127);
@@ -102,9 +106,13 @@ void loop() {
   EVContext context = {currentError, speed, throttle, brake, heading, altitude, satellites, latitude, longitude};
 
   // Update own state for broadcast
-  myData.currentChordIdx = getCurrentChordIdx();
-  myData.intensity = throttle;
-  esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));
+  if (millis() - lastBroadcastTime >= broadcastInterval) {
+    myData.currentChordIdx = getCurrentChordIdx();
+    myData.intensity = throttle;
+    myData.dissonance = currentError; // Simplified mapping
+    esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));
+    lastBroadcastTime = millis();
+  }
 
   Serial.print("Base Note: "); Serial.println(baseNote);
   Serial.print("E: "); Serial.print(currentError);
