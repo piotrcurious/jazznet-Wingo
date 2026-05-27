@@ -7,6 +7,8 @@ HardwareSerial MIDI_Serial(2); // Use UART2 for MIDI
 #include <MIDI.h>
 #include <SPI.h>
 #include <SD.h>
+#include <esp_now.h>
+#include <WiFi.h>
 struct SerialMIDI {
   typedef HardwareSerial SerialType;
   SerialMIDI(SerialType& s) : serial(s) {}
@@ -24,8 +26,42 @@ const int ANALOG_PIN_THROTTLE = 33;
 const int ANALOG_PIN_BRAKE = 25;
 const int LED_PIN = 2; // Onboard LED for many ESP32 dev boards
 
+// ESP-NOW structure
+typedef struct struct_message {
+    int currentChordIdx;
+    int intensity;
+} struct_message;
+
+struct_message myData;
+EnsembleContext ensemble;
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+    if (len == sizeof(struct_message)) {
+        struct_message* msg = (struct_message*)incomingData;
+        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity);
+    }
+}
+
 void setup() {
   Serial.begin(115200);
+
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+  }
+
+  // Register peer (broadcast)
+  esp_now_peer_info_t peerInfo;
+  memset(&peerInfo, 0, sizeof(peerInfo));
+  for(int i=0; i<6; i++) peerInfo.peer_addr[i] = 0xFF;
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+  }
+
+  esp_now_register_recv_cb(OnDataRecv);
+
   // MIDI.begin(MIDI_CHANNEL_OMNI);
   pinMode(LED_PIN, OUTPUT);
   Serial.println("ESP32 Setup complete. Starting sophisticated MIDI generation...");
@@ -65,6 +101,11 @@ void loop() {
   double longitude = 0.0;
 
   EVContext context = {currentError, speed, throttle, brake, heading, altitude, satellites, latitude, longitude};
+
+  // Update own state for broadcast
+  myData.currentChordIdx = getCurrentChordIdx();
+  myData.intensity = throttle;
+  esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));
 
   Serial.print("Base Note: "); Serial.println(baseNote);
   Serial.print("E: "); Serial.print(currentError);

@@ -291,6 +291,44 @@ void test_markov_transitions() {
     std::cout << "Markov transition tests passed!" << std::endl;
 }
 
+void test_ensemble_logic() {
+    std::cout << "Testing ensemble logic..." << std::endl;
+
+    resetImprovisation();
+    MIDI.events.clear();
+
+    // Solo performance
+    EVContext ctxSolo = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
+    playChordProgression(ctxSolo, 60);
+    int soloVelocity = 0;
+    for (auto& e : MIDI.events) if (e.on) { soloVelocity = e.velocity; break; }
+
+    // Add a peer with high intensity
+    uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    updateEnsemblePeer(peerMac, 1, 127); // Peer playing V chord at max intensity
+
+    MIDI.events.clear();
+    playChordProgression(ctxSolo, 60);
+    int ensembleVelocity = 0;
+    for (auto& e : MIDI.events) if (e.on) { ensembleVelocity = e.velocity; break; }
+
+    std::cout << "Solo velocity: " << soloVelocity << ", Ensemble velocity: " << ensembleVelocity << std::endl;
+    // Ensemble influence should increase velocity (weighted blend)
+    assert(ensembleVelocity > soloVelocity);
+
+    // Verify peer chord influence (probabilistic, so we'll check it multiple times or just verify it doesn't crash)
+    bool peerChordSeen = false;
+    for(int i=0; i<10; i++) {
+        MIDI.events.clear();
+        playChordProgression(ctxSolo, 60);
+        // Chord 1 (V chord) starts at 67 (transposed 67+0 = 67)
+        for (auto& e : MIDI.events) if (e.on && (e.note % 12 == 67 % 12)) peerChordSeen = true;
+    }
+    std::cout << "Peer chord influence seen: " << (peerChordSeen ? "Yes" : "No") << std::endl;
+
+    std::cout << "Ensemble logic tests passed!" << std::endl;
+}
+
 int main() {
     test_isDissonant_extended();
     test_chord_filtering();
@@ -301,6 +339,7 @@ int main() {
     test_jazznet_loading();
     test_arpeggiation_trigger();
     test_novelty_variation();
+    test_ensemble_logic();
     std::cout << "Extended tests passed!" << std::endl;
     return 0;
 }

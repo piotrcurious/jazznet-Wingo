@@ -51,12 +51,14 @@ static const int transitionMatrix[6][6] = {
   {10, 10,  5, 10, 60,  5}  // iii-> vi
 };
 
-static CorrelationEngine engine = {{2}, {0, 0}};
+static CorrelationEngine engine = {{2}, {0, 0}, {}, {}};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
     engine.psycho.previousError = 0;
     engine.psycho.trend = 0;
+    engine.ensemble.peerCount = 0;
+    for(int i=0; i<4; i++) engine.ensemble.peers[i].active = false;
     lastTargetNotesCount = 0;
 }
 
@@ -74,10 +76,20 @@ bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
   return false;
 }
 
-TheoryPrediction TheoryPredictor::predict(const EVContext& context) {
+TheoryPrediction TheoryPredictor::predict(const EVContext& context, const EnsembleContext& ensemble) {
     int nextChordIdx = currentChordIdx;
     int r = random(0, 100);
     int cumulative = 0;
+
+    // Influence from ensemble: tendency to gravitate towards peers' chords
+    int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
+    if (ensemble.peerCount > 0) {
+        for (int i = 0; i < 4; i++) {
+            if (ensemble.peers[i].active) {
+                ensembleInfluence[ensemble.peers[i].currentChordIdx] += 15;
+            }
+        }
+    }
 
     int entropy = map(context.speed, 0, 127, 0, 40) + map(context.altitude % 1000, 0, 999, 0, 30);
     if (entropy > 20) {
@@ -86,11 +98,14 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context) {
 
     bool found = false;
     for (int i = 0; i < 6; ++i) {
-        cumulative += transitionMatrix[currentChordIdx][i];
-        if (r < cumulative) {
-            nextChordIdx = i;
-            found = true;
-            break;
+        int weight = transitionMatrix[currentChordIdx][i] + ensembleInfluence[i];
+        cumulative += weight;
+        if (r < cumulative || (i == 5 && !found)) { // Ensure fallback if r is large due to weights
+            if (r < cumulative) {
+                nextChordIdx = i;
+                found = true;
+                break;
+            }
         }
     }
     if (!found) nextChordIdx = random(0, 6);
@@ -102,6 +117,25 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context) {
     }
 
     return {nextChordIdx, harmonyTension};
+}
+
+PsychoacousticPrediction EnsemblePredictor::predict(const EVContext& context, const EnsembleContext& ensemble) {
+    int collectiveDissonance = 0;
+    int collectiveIntensity = 0;
+    int activePeers = 0;
+
+    for (int i = 0; i < 4; i++) {
+        if (ensemble.peers[i].active) {
+            collectiveIntensity += ensemble.peers[i].intensity;
+            activePeers++;
+        }
+    }
+
+    if (activePeers > 0) {
+        collectiveIntensity /= activePeers;
+    }
+
+    return {0, collectiveIntensity, 0}; // Currently only influence intensity
 }
 
 PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& context) {
@@ -131,9 +165,16 @@ PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& conte
 }
 
 void CorrelationEngine::process(const EVContext& context, int baseNote) {
-    TheoryPrediction tp = theory.predict(context);
+    TheoryPrediction tp = theory.predict(context, ensemble);
     PsychoacousticPrediction pp = psycho.predict(context);
+    PsychoacousticPrediction ep = ensemblePredictor.predict(context, ensemble);
+
     theory.currentChordIdx = tp.nextChordIdx;
+
+    // Blend ensemble intensity
+    if (ensemble.peerCount > 0) {
+        pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
+    }
 
     long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
     int patternIdx = (geoSeed + (context.speed / 10)) % 100;
@@ -344,8 +385,58 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
+void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity) {
+    int slot = -1;
+    for (int i = 0; i < 4; i++) {
+        if (ensemble.peers[i].active && memcmp(ensemble.peers[i].macAddr, mac, 6) == 0) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) {
+        for (int i = 0; i < 4; i++) {
+            if (!ensemble.peers[i].active) {
+                slot = i;
+                ensemble.peerCount++;
+                break;
+            }
+        }
+    }
+
+    if (slot != -1) {
+        memcpy(ensemble.peers[slot].macAddr, mac, 6);
+        ensemble.peers[slot].currentChordIdx = chordIdx;
+        ensemble.peers[slot].intensity = intensity;
+        ensemble.peers[slot].lastSeen = millis();
+        ensemble.peers[slot].active = true;
+    }
+
+    // Cleanup inactive peers
+    long now = millis();
+    for (int i = 0; i < 4; i++) {
+        if (ensemble.peers[i].active && (now - ensemble.peers[i].lastSeen > 5000)) {
+            ensemble.peers[i].active = false;
+            ensemble.peerCount--;
+        }
+    }
+}
+
 void playChordProgression(const EVContext& context, int currentBaseNote) {
   engine.process(context, currentBaseNote);
+}
+
+void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote) {
+    engine.ensemble = ensemble;
+    engine.process(context, currentBaseNote);
+}
+
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity) {
+    engine.updatePeer(mac, chordIdx, intensity);
+}
+
+int getCurrentChordIdx() {
+    return engine.theory.currentChordIdx;
 }
 
 void visualFeedback(int intensity) {
