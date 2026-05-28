@@ -70,6 +70,7 @@ struct PeerState {
     double latitude;
     double longitude;
     MusicalRole role;
+    long firstSeen;
     long lastSeen;
     bool active;
 };
@@ -129,6 +130,7 @@ void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
 void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon);
 void setLocalRole(MusicalRole role);
+void logEnsembleStatus();
 int getCurrentChordIdx();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);

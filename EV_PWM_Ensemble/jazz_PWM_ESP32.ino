@@ -135,6 +135,8 @@ void loop() {
 
   playChordProgression(context, baseNote);
 
+  if (millis() % 2000 < 50) logEnsembleStatus();
+
   int predictedError = predictError(currentError);
   Serial.print("Pred E: "); Serial.println(predictedError);
 
