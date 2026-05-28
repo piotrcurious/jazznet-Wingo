@@ -74,9 +74,6 @@ bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
   for (int i = 0; i < contextNotesCount; ++i) {
     if (contextNotes[i] == -1) continue;
     int interval = abs(note - contextNotes[i]) % 12;
-    // In jazz, major 2nds (2) and minor 7ths (10) are often acceptable.
-    // Tritones (6) are essential in dominant chords.
-    // Minor 2nd (1) is usually the most dissonant.
     if (interval == 1) {
       return true;
     }
@@ -202,14 +199,47 @@ PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& conte
     return {constrain(dissonance, 0, 100), constrain(intensity, 0, 100), constrain(jitter, 0, 100)};
 }
 
-void CorrelationEngine::process(const EVContext& context, int baseNote) {
-    ENSEMBLE_LOCK();
-    // Cleanup inactive peers
+void CorrelationEngine::cleanupPeers() {
     long now = millis();
     for (int i = 0; i < 4; i++) {
         if (ensemble.peers[i].active && (now - ensemble.peers[i].lastSeen > 5000)) {
             ensemble.peers[i].active = false;
             ensemble.peerCount--;
+        }
+    }
+}
+
+int CorrelationEngine::calculateTransposition(const EVContext& context, int baseNote) {
+    int headingOffset = map(context.heading % 360, 0, 359, 0, 11);
+    int altitudeOffset = (context.altitude / 100);
+    int speedOffset = map(context.speed, 0, 127, -12, 12);
+    int transpositionOffset = (baseNote + ensemble.ensembleKeyOffset - 60) + headingOffset + altitudeOffset + speedOffset;
+
+    if (localRole == ROLE_BASS) transpositionOffset -= 12;
+    else if (localRole == ROLE_LEAD) transpositionOffset += 12;
+
+    return transpositionOffset;
+}
+
+void CorrelationEngine::process(const EVContext& context, int baseNote) {
+    ENSEMBLE_LOCK();
+    cleanupPeers();
+
+    if (ensemble.peerCount > 0) {
+        int targetKeyOffset = 0;
+        int activePeersCount = 0;
+        for(int i=0; i<4; i++) {
+            if(ensemble.peers[i].active) {
+                targetKeyOffset += ensemble.peers[i].currentKeyOffset;
+                activePeersCount++;
+            }
+        }
+        if (activePeersCount > 0) {
+            targetKeyOffset /= activePeersCount;
+            if (random(0, 100) < 5) {
+                if (ensemble.ensembleKeyOffset < targetKeyOffset) ensemble.ensembleKeyOffset++;
+                else if (ensemble.ensembleKeyOffset > targetKeyOffset) ensemble.ensembleKeyOffset--;
+            }
         }
     }
 
@@ -219,17 +249,19 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     theory.currentChordIdx = tp.nextChordIdx;
 
-    // Blend ensemble intensity and dissonance
     if (ensemble.peerCount > 0) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
         pp.perceivedDissonance = (pp.perceivedDissonance * 8 + ep.perceivedDissonance * 2) / 10;
 
-        // Stateful Call and Response
         if (ensemble.callAndResponseTicks > 0) {
             ensemble.callAndResponseTicks--;
         } else {
-            // Density adaptation: higher peer count = higher chance to listen
+            bool peerListening = false;
+            for(int i=0; i<4; i++) if(ensemble.peers[i].active && ensemble.peers[i].listening) peerListening = true;
+
             int listenProb = 20 + ensemble.peerCount * 15;
+            if (peerListening) listenProb += 30; // Synchronize "breathing"
+
             if (ep.energeticIntensity > 80 && random(0, 100) < listenProb) {
                 ensemble.inCallAndResponse = true;
                 ensemble.callAndResponseTicks = 4;
@@ -242,6 +274,13 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         ensemble.callAndResponseTicks = 0;
     }
 
+    int transOffset = calculateTransposition(context, baseNote);
+    performMusicalLogic(context, pp, tp, transOffset);
+
+    ENSEMBLE_UNLOCK();
+}
+
+void CorrelationEngine::performMusicalLogic(const EVContext& context, const PsychoacousticPrediction& pp, const TheoryPrediction& tp, int transpositionOffset) {
     long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
     int patternIdx = (geoSeed + (context.speed / 10)) % 100;
 
@@ -271,19 +310,9 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         useJazznet = (jazznetSize > 0);
     }
 
-    int headingOffset = map(context.heading % 360, 0, 359, 0, 11);
-    int altitudeOffset = (context.altitude / 100);
-    int speedOffset = map(context.speed, 0, 127, -12, 12);
-    int transpositionOffset = (baseNote - 60) + headingOffset + altitudeOffset + speedOffset;
-
-    // Role-based transposition
-    if (localRole == ROLE_BASS) transpositionOffset -= 12;
-    else if (localRole == ROLE_LEAD) transpositionOffset += 12;
-
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
-    // Role-based velocity refinement
     if (localRole == ROLE_BASS) velocity = constrain(velocity + 15, 60, 127);
-    // Peer leadership influences local tempo
+
     int tempoOffset = 0;
     if (ensemble.peerCount > 0) {
         int maxPeerSpeed = 0;
@@ -321,10 +350,9 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     int novelty = (pp.perceivedDissonance + tp.harmonyTension) / 2;
 
     if (useJazznet) {
-        // Role-based pattern variation
-        if (localRole == ROLE_COMPING) novelty /= 2; // Comping stays more stable
+        if (localRole == ROLE_COMPING) novelty /= 2;
         for (int offset = 0; offset < jazznetSize; offset += 4) {
-            if (ensemble.inCallAndResponse && offset > 0 && random(0,100) < 70) continue; // Skip notes in "listen" mode
+            if (ensemble.inCallAndResponse && offset > 0 && random(0,100) < 70) continue;
 
             int currentSegmentSize = (jazznetSize - offset > 4) ? 4 : (jazznetSize - offset);
             int currentVelocity = (offset == 0) ? velocity : constrain(velocity + psycho.trend * 5, 30, 127);
@@ -347,7 +375,6 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     stopLastPlayedNotes();
     visualFeedback(0);
-    ENSEMBLE_UNLOCK();
 }
 
 void sendMIDINoteOnWrapper(int note, int velocity) {
@@ -399,7 +426,6 @@ bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize
     File file = SD.open(fullpath);
     if (!file) return false;
     while (file.available() && *patternSize < maxNotes) {
-        // Simple CSV-like parsing: assumes notes separated by commas or newlines
         int note = file.parseInt();
         if (note >= 0 && note <= 127) {
             patternNotes[*patternSize] = note;
@@ -427,8 +453,6 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   int currentChordNotes[MAX_NOTES_PER_CHORD] = {-1, -1, -1, -1};
   int currentChordNotesCount = 0;
 
-  // Simple voice leading: find the best octave for each note in the new chord
-  // to be close to the average of the last played notes.
   int targetCenter = 64 + transpositionOffset;
   if (lastTargetNotesCount > 0) {
     long sum = 0;
@@ -439,7 +463,6 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   for (int i = 0; i < chordDefSize && currentChordNotesCount < MAX_NOTES_PER_CHORD; ++i) {
     int noteBase = (chordDefinition[i] + transpositionOffset) % 12;
 
-    // Find octave that brings noteBase closest to targetCenter
     int bestNote = -1;
     int minDiff = 128;
     for (int octave = 3; octave <= 6; ++octave) {
@@ -462,14 +485,13 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
     }
   }
 
-  // Update lastTargetNotes for next call
   for (int i = 0; i < currentChordNotesCount; ++i) {
     lastTargetNotes[i] = currentChordNotes[i];
   }
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon) {
+void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
     if (chordIdx < 0 || chordIdx >= 6) return; // Validation
 
     ENSEMBLE_LOCK();
@@ -502,7 +524,9 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, in
         ensemble.peers[slot].speed = speed;
         ensemble.peers[slot].latitude = lat;
         ensemble.peers[slot].longitude = lon;
-        // Determine role based on MAC sum for stability
+        ensemble.peers[slot].currentKeyOffset = keyOffset;
+        ensemble.peers[slot].listening = listening;
+
         int macSum = 0;
         for(int i=0; i<6; i++) macSum += mac[i];
         ensemble.peers[slot].role = (MusicalRole)(macSum % 3);
@@ -522,8 +546,8 @@ void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleCo
     engine.process(context, currentBaseNote);
 }
 
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon) {
-    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening);
 }
 
 void setLocalRole(MusicalRole role) {
@@ -552,12 +576,19 @@ int getCurrentChordIdx() {
     return engine.theory.currentChordIdx;
 }
 
+int getCurrentKeyOffset() {
+    return engine.ensemble.ensembleKeyOffset;
+}
+
+bool isLocalListening() {
+    return engine.ensemble.inCallAndResponse;
+}
+
 void visualFeedback(int intensity) {
 #ifndef MOCK_TESTING
     if (intensity > 0) {
-        // If peers are active, do a "social" blink pattern
         if (engine.ensemble.peerCount > 0) {
-            analogWrite(2, intensity / 2); // Dimmer for multi-vehicle awareness
+            analogWrite(2, intensity / 2);
         } else {
             digitalWrite(2, HIGH);
         }

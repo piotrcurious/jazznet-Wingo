@@ -305,7 +305,7 @@ void test_ensemble_logic() {
 
     // Add a peer with high intensity and high dissonance
     uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0); // Peer playing V chord at max intensity/dissonance
+    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false); // Peer playing V chord at max intensity/dissonance
 
     MIDI.events.clear();
     playChordProgression(ctxSolo, 60);
@@ -334,7 +334,7 @@ void test_peer_timeout() {
     resetImprovisation();
 
     uint8_t peerMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-    updateEnsemblePeer(peerMac, 1, 100, 0, 0, 0.0, 0.0);
+    updateEnsemblePeer(peerMac, 1, 100, 0, 0, 0.0, 0.0, 0, false);
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     playChordProgression(ctx, 60); // Trigger cleanup (it's in process now)
@@ -353,7 +353,7 @@ void test_invalid_peer_data() {
     resetImprovisation();
 
     uint8_t peerMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    updateEnsemblePeer(peerMac, 99, 100, 0, 0, 0.0, 0.0); // Invalid chord index
+    updateEnsemblePeer(peerMac, 99, 100, 0, 0, 0.0, 0.0, 0, false); // Invalid chord index
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     playChordProgression(ctx, 60);

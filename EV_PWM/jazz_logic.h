@@ -70,6 +70,8 @@ struct PeerState {
     double latitude;
     double longitude;
     MusicalRole role;
+    int currentKeyOffset;
+    bool listening;
     long firstSeen;
     long lastSeen;
     bool active;
@@ -79,6 +81,7 @@ struct EnsembleContext {
     PeerState peers[4];
     int peerCount;
     int collectiveTension;
+    int ensembleKeyOffset; // -6 to +6 relative to local baseNote
     bool inCallAndResponse;
     int callAndResponseTicks;
 };
@@ -118,7 +121,12 @@ struct CorrelationEngine {
     MusicalRole localRole;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon);
+    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
+
+private:
+    void cleanupPeers();
+    int calculateTransposition(const EVContext& context, int baseNote);
+    void performMusicalLogic(const EVContext& context, const PsychoacousticPrediction& pp, const TheoryPrediction& tp, int transOffset);
 };
 
 // Functions
@@ -128,10 +136,12 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize, int maxNotes);
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
 void setLocalRole(MusicalRole role);
 void logEnsembleStatus();
 int getCurrentChordIdx();
+int getCurrentKeyOffset();
+bool isLocalListening();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
 void sendMIDINoteOffWrapper(int note);
