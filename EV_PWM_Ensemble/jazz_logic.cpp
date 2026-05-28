@@ -56,8 +56,16 @@ static const int transitionMatrix[6][6] = {
 #ifdef MOCK_TESTING
 std::mutex ensembleMutex;
 #else
-SemaphoreHandle_t ensembleMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t ensembleMutex = NULL;
 #endif
+
+void initEnsembleMutex() {
+#ifndef MOCK_TESTING
+    if (ensembleMutex == NULL) {
+        ensembleMutex = xSemaphoreCreateMutex();
+    }
+#endif
+}
 
 static CorrelationEngine engine = {{2}, {0, 0}, {}, {}, ROLE_COMPING};
 
@@ -251,6 +259,7 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     if (ensemble.peerCount > 0) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
+        // Ensemble Mood Alignment: Dissonance synchronization
         pp.perceivedDissonance = (pp.perceivedDissonance * 8 + ep.perceivedDissonance * 2) / 10;
 
         if (ensemble.callAndResponseTicks > 0) {
@@ -491,7 +500,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
+void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
     if (chordIdx < 0 || chordIdx >= 6) return; // Validation
 
     ENSEMBLE_LOCK();
@@ -504,11 +513,23 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, in
     }
 
     if (slot == -1) {
+        // Look for inactive slot
         for (int i = 0; i < 4; i++) {
             if (!ensemble.peers[i].active) {
                 slot = i;
                 ensemble.peerCount++;
                 break;
+            }
+        }
+
+        // If all slots full, replace oldest inactive (already cleaned) or simply the oldest by lastSeen
+        if (slot == -1) {
+            long oldestSeen = millis();
+            for (int i = 0; i < 4; i++) {
+                if (ensemble.peers[i].lastSeen < oldestSeen) {
+                    oldestSeen = ensemble.peers[i].lastSeen;
+                    slot = i;
+                }
             }
         }
     }
@@ -546,7 +567,7 @@ void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleCo
     engine.process(context, currentBaseNote);
 }
 
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
     engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening);
 }
 
@@ -587,8 +608,21 @@ bool isLocalListening() {
 void visualFeedback(int intensity) {
 #ifndef MOCK_TESTING
     if (intensity > 0) {
+        bool isLeader = true;
+        for(int i=0; i<4; i++) {
+            if(engine.ensemble.peers[i].active && engine.ensemble.peers[i].intensity > intensity) {
+                isLeader = false;
+                break;
+            }
+        }
+
         if (engine.ensemble.peerCount > 0) {
-            analogWrite(2, intensity / 2);
+            if (isLeader) {
+                // Bright rapid pulse for leadership
+                analogWrite(2, (millis() % 200 < 100) ? 255 : 50);
+            } else {
+                analogWrite(2, intensity / 4);
+            }
         } else {
             digitalWrite(2, HIGH);
         }
