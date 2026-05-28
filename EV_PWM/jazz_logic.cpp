@@ -93,20 +93,25 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
     // "Leadership" dynamics: peers with higher intensity have more influence.
     // "Harmonic Mimicry": peers also influence related chords (dominant/subdominant).
     // "Spatial Weighting": closer peers have stronger influence.
+    // "Longevity Trust": longer active peers have more influence.
     int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
     if (ensemble.peerCount > 0) {
+        long now = millis();
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
-                    // Approximate distance squared (scaled for map)
+                    // Longevity bonus: up to +10 weight after 30s
+                    long activeDuration = now - ensemble.peers[i].firstSeen;
+                    int trustBonus = map(constrain(activeDuration, 0, 30000), 0, 30000, 0, 10);
+
                     double dl = context.latitude - ensemble.peers[i].latitude;
                     double dg = context.longitude - ensemble.peers[i].longitude;
                     long distSq = (long)((dl*dl + dg*dg) * 1000000);
                     int distanceScale = map(constrain(distSq, 0, 1000), 0, 1000, 20, 5);
 
                     int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 20);
-                    int baseWeight = (10 + leadership) * distanceScale / 10;
+                    int baseWeight = (10 + leadership + trustBonus) * distanceScale / 10;
                     ensembleInfluence[peerChord] += baseWeight;
 
                     int dominant = (peerChord + 1) % 6;
@@ -223,9 +228,11 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         if (ensemble.callAndResponseTicks > 0) {
             ensemble.callAndResponseTicks--;
         } else {
-            if (ep.energeticIntensity > 85 && random(0, 100) < 20) {
+            // Density adaptation: higher peer count = higher chance to listen
+            int listenProb = 20 + ensemble.peerCount * 15;
+            if (ep.energeticIntensity > 80 && random(0, 100) < listenProb) {
                 ensemble.inCallAndResponse = true;
-                ensemble.callAndResponseTicks = 4; // Stay in mode for 4 iterations
+                ensemble.callAndResponseTicks = 4;
             } else {
                 ensemble.inCallAndResponse = false;
             }
@@ -274,6 +281,8 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     else if (localRole == ROLE_LEAD) transpositionOffset += 12;
 
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
+    // Role-based velocity refinement
+    if (localRole == ROLE_BASS) velocity = constrain(velocity + 15, 60, 127);
     // Peer leadership influences local tempo
     int tempoOffset = 0;
     if (ensemble.peerCount > 0) {
@@ -483,6 +492,9 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, in
     }
 
     if (slot != -1) {
+        if (!ensemble.peers[slot].active) {
+            ensemble.peers[slot].firstSeen = millis();
+        }
         memcpy(ensemble.peers[slot].macAddr, mac, 6);
         ensemble.peers[slot].currentChordIdx = chordIdx;
         ensemble.peers[slot].intensity = intensity;
@@ -516,6 +528,24 @@ void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonanc
 
 void setLocalRole(MusicalRole role) {
     engine.localRole = role;
+}
+
+void logEnsembleStatus() {
+    ENSEMBLE_LOCK();
+    if (engine.ensemble.peerCount > 0) {
+        Serial.print("--- Ensemble Status (");
+        Serial.print(engine.ensemble.peerCount);
+        Serial.println(" peers) ---");
+        for (int i = 0; i < 4; i++) {
+            if (engine.ensemble.peers[i].active) {
+                Serial.print("Peer "); Serial.print(i);
+                Serial.print(" Role: "); Serial.print((int)engine.ensemble.peers[i].role);
+                Serial.print(" Int: "); Serial.print(engine.ensemble.peers[i].intensity);
+                Serial.print(" Chord: "); Serial.println(engine.ensemble.peers[i].currentChordIdx);
+            }
+        }
+    }
+    ENSEMBLE_UNLOCK();
 }
 
 int getCurrentChordIdx() {
