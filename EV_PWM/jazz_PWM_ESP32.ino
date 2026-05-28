@@ -49,6 +49,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 
 void setup() {
   Serial.begin(115200);
+  initEnsembleMutex();
 
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {

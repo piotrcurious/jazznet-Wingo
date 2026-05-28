@@ -304,7 +304,7 @@ void test_ensemble_logic() {
     for (auto& e : MIDI.events) if (e.on) { soloVelocity = e.velocity; break; }
 
     // Add a peer with high intensity and high dissonance
-    uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    const uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
     updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false); // Peer playing V chord at max intensity/dissonance
 
     MIDI.events.clear();
@@ -333,7 +333,7 @@ void test_peer_timeout() {
     std::cout << "Testing peer timeout..." << std::endl;
     resetImprovisation();
 
-    uint8_t peerMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+    const uint8_t peerMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
     updateEnsemblePeer(peerMac, 1, 100, 0, 0, 0.0, 0.0, 0, false);
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
@@ -352,7 +352,7 @@ void test_invalid_peer_data() {
     std::cout << "Testing invalid peer data..." << std::endl;
     resetImprovisation();
 
-    uint8_t peerMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    const uint8_t peerMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     updateEnsemblePeer(peerMac, 99, 100, 0, 0, 0.0, 0.0, 0, false); // Invalid chord index
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
@@ -360,6 +360,59 @@ void test_invalid_peer_data() {
 
     // If it didn't crash and didn't apply invalid index, it's good.
     std::cout << "Invalid peer data test passed!" << std::endl;
+}
+
+void test_spatial_weighting() {
+    std::cout << "Testing spatial weighting..." << std::endl;
+    resetImprovisation();
+
+    // Peer 1: Very close (0,0)
+    const uint8_t peer1[6] = {0x1, 0x1, 0x1, 0x1, 0x1, 0x1};
+    updateEnsemblePeer(peer1, 1, 100, 0, 0, 0.0, 0.0, 0, false);
+
+    // Peer 2: Far away (0.01, 0.01) -> ~1.5km
+    const uint8_t peer2[6] = {0x2, 0x2, 0x2, 0x2, 0x2, 0x2};
+    updateEnsemblePeer(peer2, 5, 100, 0, 0, 0.01, 0.01, 0, false);
+
+    EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
+
+    // We expect Peer 1 (Chord 1) to have more influence than Peer 2 (Chord 5)
+    int chord1Count = 0;
+    int chord5Count = 0;
+    for(int i=0; i<200; i++) {
+        MIDI.events.clear();
+        playChordProgression(ctx, 60);
+        int currentChord = getCurrentChordIdx();
+        if (currentChord == 1) chord1Count++;
+        if (currentChord == 5) chord5Count++;
+    }
+
+    std::cout << "Chord 1 (Close) hits: " << chord1Count << ", Chord 5 (Far) hits: " << chord5Count << std::endl;
+    assert(chord1Count >= chord5Count); // Close peer should exert more pull
+
+    std::cout << "Spatial weighting test passed!" << std::endl;
+}
+
+void test_key_alignment() {
+    std::cout << "Testing key alignment..." << std::endl;
+    resetImprovisation();
+
+    // Peers are all in key +2
+    const uint8_t peer[6] = {0x3, 0x3, 0x3, 0x3, 0x3, 0x3};
+    updateEnsemblePeer(peer, 1, 100, 0, 0, 0.0, 0.0, 2, false);
+
+    EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
+
+    // Run many cycles to see if local key offset moves from 0 toward 2
+    for(int i=0; i<1000; i++) {
+        playChordProgression(ctx, 60);
+    }
+
+    int finalKey = getCurrentKeyOffset();
+    std::cout << "Final key offset after peer influence: " << finalKey << std::endl;
+    assert(finalKey > 0); // Should have moved toward +2
+
+    std::cout << "Key alignment test passed!" << std::endl;
 }
 
 int main() {
@@ -375,6 +428,8 @@ int main() {
     test_ensemble_logic();
     test_peer_timeout();
     test_invalid_peer_data();
+    test_spatial_weighting();
+    test_key_alignment();
     std::cout << "Extended tests passed!" << std::endl;
     return 0;
 }

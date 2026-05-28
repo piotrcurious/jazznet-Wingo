@@ -121,7 +121,7 @@ struct CorrelationEngine {
     MusicalRole localRole;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
+    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
 
 private:
     void cleanupPeers();
@@ -136,7 +136,8 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize, int maxNotes);
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
+void initEnsembleMutex();
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
 void setLocalRole(MusicalRole role);
 void logEnsembleStatus();
 int getCurrentChordIdx();

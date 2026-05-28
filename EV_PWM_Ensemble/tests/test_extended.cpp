@@ -304,7 +304,7 @@ void test_ensemble_logic() {
     for (auto& e : MIDI.events) if (e.on) { soloVelocity = e.velocity; break; }
 
     // Add a peer with high intensity and high dissonance
-    uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    const uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
     updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false); // Peer playing V chord at max intensity/dissonance
 
     MIDI.events.clear();
@@ -333,7 +333,7 @@ void test_peer_timeout() {
     std::cout << "Testing peer timeout..." << std::endl;
     resetImprovisation();
 
-    uint8_t peerMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+    const uint8_t peerMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
     updateEnsemblePeer(peerMac, 1, 100, 0, 0, 0.0, 0.0, 0, false);
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
@@ -352,7 +352,7 @@ void test_invalid_peer_data() {
     std::cout << "Testing invalid peer data..." << std::endl;
     resetImprovisation();
 
-    uint8_t peerMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    const uint8_t peerMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     updateEnsemblePeer(peerMac, 99, 100, 0, 0, 0.0, 0.0, 0, false); // Invalid chord index
 
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
