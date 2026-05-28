@@ -32,6 +32,8 @@ typedef struct struct_message {
     int intensity;
     int dissonance;
     int speed;
+    double latitude;
+    double longitude;
 } struct_message;
 
 struct_message myData;
@@ -39,7 +41,7 @@ struct_message myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     if (len == sizeof(struct_message)) {
         struct_message* msg = (struct_message*)incomingData;
-        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed);
+        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed, msg->latitude, msg->longitude);
     }
 }
 
@@ -62,6 +64,13 @@ void setup() {
   }
 
   esp_now_register_recv_cb(OnDataRecv);
+
+  // Determine local role based on MAC
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  int macSum = 0;
+  for(int i=0; i<6; i++) macSum += mac[i];
+  setLocalRole((MusicalRole)(macSum % 3));
 
   // MIDI.begin(MIDI_CHANNEL_OMNI);
   pinMode(LED_PIN, OUTPUT);
@@ -112,6 +121,8 @@ void loop() {
     myData.intensity = throttle;
     myData.dissonance = currentError;
     myData.speed = speed;
+    myData.latitude = latitude;
+    myData.longitude = longitude;
     esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));
     lastBroadcastTime = millis();
   }

@@ -53,7 +53,13 @@ static const int transitionMatrix[6][6] = {
   {10, 10,  5, 10, 60,  5}  // iii-> vi
 };
 
-static CorrelationEngine engine = {{2}, {0, 0}, {}, {}};
+#ifdef MOCK_TESTING
+std::mutex ensembleMutex;
+#else
+SemaphoreHandle_t ensembleMutex = xSemaphoreCreateMutex();
+#endif
+
+static CorrelationEngine engine = {{2}, {0, 0}, {}, {}, ROLE_COMPING};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
@@ -86,17 +92,23 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
     // Influence from ensemble: tendency to gravitate towards peers' chords
     // "Leadership" dynamics: peers with higher intensity have more influence.
     // "Harmonic Mimicry": peers also influence related chords (dominant/subdominant).
+    // "Spatial Weighting": closer peers have stronger influence.
     int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
     if (ensemble.peerCount > 0) {
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
+                    // Approximate distance squared (scaled for map)
+                    double dl = context.latitude - ensemble.peers[i].latitude;
+                    double dg = context.longitude - ensemble.peers[i].longitude;
+                    long distSq = (long)((dl*dl + dg*dg) * 1000000);
+                    int distanceScale = map(constrain(distSq, 0, 1000), 0, 1000, 20, 5);
+
                     int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 20);
-                    int baseWeight = 10 + leadership;
+                    int baseWeight = (10 + leadership) * distanceScale / 10;
                     ensembleInfluence[peerChord] += baseWeight;
 
-                    // Mimicry: small influence on related chords (simplified)
                     int dominant = (peerChord + 1) % 6;
                     int subdominant = (peerChord + 5) % 6;
                     ensembleInfluence[dominant] += baseWeight / 3;
@@ -186,6 +198,7 @@ PsychoacousticPrediction PsychoacousticPredictor::predict(const EVContext& conte
 }
 
 void CorrelationEngine::process(const EVContext& context, int baseNote) {
+    ENSEMBLE_LOCK();
     // Cleanup inactive peers
     long now = millis();
     for (int i = 0; i < 4; i++) {
@@ -256,6 +269,10 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     int speedOffset = map(context.speed, 0, 127, -12, 12);
     int transpositionOffset = (baseNote - 60) + headingOffset + altitudeOffset + speedOffset;
 
+    // Role-based transposition
+    if (localRole == ROLE_BASS) transpositionOffset -= 12;
+    else if (localRole == ROLE_LEAD) transpositionOffset += 12;
+
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
     // Peer leadership influences local tempo
     int tempoOffset = 0;
@@ -295,6 +312,8 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     int novelty = (pp.perceivedDissonance + tp.harmonyTension) / 2;
 
     if (useJazznet) {
+        // Role-based pattern variation
+        if (localRole == ROLE_COMPING) novelty /= 2; // Comping stays more stable
         for (int offset = 0; offset < jazznetSize; offset += 4) {
             if (ensemble.inCallAndResponse && offset > 0 && random(0,100) < 70) continue; // Skip notes in "listen" mode
 
@@ -319,6 +338,7 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     stopLastPlayedNotes();
     visualFeedback(0);
+    ENSEMBLE_UNLOCK();
 }
 
 void sendMIDINoteOnWrapper(int note, int velocity) {
@@ -440,9 +460,10 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed) {
+void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon) {
     if (chordIdx < 0 || chordIdx >= 6) return; // Validation
 
+    ENSEMBLE_LOCK();
     int slot = -1;
     for (int i = 0; i < 4; i++) {
         if (ensemble.peers[i].active && memcmp(ensemble.peers[i].macAddr, mac, 6) == 0) {
@@ -467,9 +488,17 @@ void CorrelationEngine::updatePeer(uint8_t* mac, int chordIdx, int intensity, in
         ensemble.peers[slot].intensity = intensity;
         ensemble.peers[slot].dissonance = dissonance;
         ensemble.peers[slot].speed = speed;
+        ensemble.peers[slot].latitude = lat;
+        ensemble.peers[slot].longitude = lon;
+        // Determine role based on MAC sum for stability
+        int macSum = 0;
+        for(int i=0; i<6; i++) macSum += mac[i];
+        ensemble.peers[slot].role = (MusicalRole)(macSum % 3);
+
         ensemble.peers[slot].lastSeen = millis();
         ensemble.peers[slot].active = true;
     }
+    ENSEMBLE_UNLOCK();
 }
 
 void playChordProgression(const EVContext& context, int currentBaseNote) {
@@ -481,8 +510,12 @@ void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleCo
     engine.process(context, currentBaseNote);
 }
 
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed) {
-    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon);
+}
+
+void setLocalRole(MusicalRole role) {
+    engine.localRole = role;
 }
 
 int getCurrentChordIdx() {
@@ -491,10 +524,15 @@ int getCurrentChordIdx() {
 
 void visualFeedback(int intensity) {
 #ifndef MOCK_TESTING
-  if (intensity > 0) {
-    digitalWrite(13, HIGH);
-  } else {
-    digitalWrite(13, LOW);
-  }
+    if (intensity > 0) {
+        // If peers are active, do a "social" blink pattern
+        if (engine.ensemble.peerCount > 0) {
+            analogWrite(2, intensity / 2); // Dimmer for multi-vehicle awareness
+        } else {
+            digitalWrite(2, HIGH);
+        }
+    } else {
+        digitalWrite(2, LOW);
+    }
 #endif
 }

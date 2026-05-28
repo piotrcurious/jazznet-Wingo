@@ -10,7 +10,21 @@ extern MockSerial Serial;
 #else
 #include <Arduino.h>
 #include <MIDI.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 extern midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> MIDI;
+#endif
+
+// Mutex handling for thread safety
+#ifdef MOCK_TESTING
+#include <mutex>
+extern std::mutex ensembleMutex;
+#define ENSEMBLE_LOCK() ensembleMutex.lock()
+#define ENSEMBLE_UNLOCK() ensembleMutex.unlock()
+#else
+extern SemaphoreHandle_t ensembleMutex;
+#define ENSEMBLE_LOCK() xSemaphoreTake(ensembleMutex, portMAX_DELAY)
+#define ENSEMBLE_UNLOCK() xSemaphoreGive(ensembleMutex)
 #endif
 
 // Constants
@@ -45,12 +59,17 @@ struct EVContext {
 };
 
 // Ensemble Dynamics
+enum MusicalRole { ROLE_LEAD, ROLE_COMPING, ROLE_BASS };
+
 struct PeerState {
     uint8_t macAddr[6];
     int currentChordIdx;
     int intensity;
     int dissonance;
     int speed;
+    double latitude;
+    double longitude;
+    MusicalRole role;
     long lastSeen;
     bool active;
 };
@@ -95,9 +114,10 @@ struct CorrelationEngine {
     PsychoacousticPredictor psycho;
     EnsemblePredictor ensemblePredictor;
     EnsembleContext ensemble;
+    MusicalRole localRole;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed);
+    void updatePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon);
 };
 
 // Functions
@@ -107,7 +127,8 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize, int maxNotes);
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
-void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed);
+void updateEnsemblePeer(uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon);
+void setLocalRole(MusicalRole role);
 int getCurrentChordIdx();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
