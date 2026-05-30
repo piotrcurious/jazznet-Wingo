@@ -89,7 +89,22 @@ bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
 TheoryPrediction TheoryPredictor::predict(const EVContext& context, const EnsembleContext& ensemble) {
     if (ensemble.peerCount > 0) {
         int tensionCount = 0;
-        for(int i=0; i<4; i++) if(ensemble.peers[i].active && ensemble.peers[i].intensity > 90) tensionCount++;
+        int groupMoodSum = 0;
+        int trustedPeers = 0;
+        for(int i=0; i<4; i++) {
+            if(ensemble.peers[i].active) {
+                if (ensemble.peers[i].intensity > 90) tensionCount++;
+                groupMoodSum += (int)ensemble.peers[i].mood;
+                trustedPeers++;
+            }
+        }
+
+        // Ensemble Tension Waves: synchronizing mood transitions
+        if (trustedPeers > 0) {
+            int avgMood = groupMoodSum / trustedPeers;
+            if (random(0,100) < 20) localMood = (EnsembleMood)avgMood;
+        }
+
         if (tensionCount > ensemble.peerCount / 2) {
             if (random(0,100) < 40) localMood = MOOD_TENSION;
         } else if (tensionCount == 0) {
@@ -102,6 +117,7 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
     int ensembleInfluence[6] = {0, 0, 0, 0, 0, 0};
     if (ensemble.peerCount > 0) {
         long now = millis();
+        int peerChordVotes[6] = {0, 0, 0, 0, 0, 0};
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
@@ -117,9 +133,12 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
                     ensembleInfluence[peerChord] += baseWeight;
                     ensembleInfluence[(peerChord + 1) % 6] += baseWeight / 2;
                     ensembleInfluence[(peerChord + 5) % 6] += baseWeight / 2;
+                    peerChordVotes[peerChord]++;
                 }
             }
         }
+        // Social Harmonic Entrainment: resolve collective ii-V or IV-V to I
+        if (peerChordVotes[1] > 0 && (peerChordVotes[0] > 0 || peerChordVotes[3] > 0)) ensembleInfluence[2] += 40;
     }
 
     int totalWeight = 0;
@@ -264,7 +283,18 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
 void CorrelationEngine::performMusicalLogic(const EVContext& context, const PsychoacousticPrediction& pp, const TheoryPrediction& tp, int transpositionOffset, const EnsembleContext& ensSnap) {
     long geoSeed = (long)(context.latitude * 100) + (long)(context.longitude * 100);
-    int patternIdx = (geoSeed + (context.speed / 10)) % 100;
+
+    // Pattern Selection refinement: role and mood influence the CSV choice
+    int baseRange = 0;
+    if (localRole == ROLE_BASS) baseRange = 0; // 0-33
+    else if (localRole == ROLE_COMPING) baseRange = 34; // 34-66
+    else baseRange = 67; // 67-99
+
+    int moodShift = 0;
+    if (theory.localMood == MOOD_TENSION) moodShift = 5;
+    else if (theory.localMood == MOOD_DISCOVERY) moodShift = 10;
+
+    int patternIdx = (baseRange + (geoSeed % 20) + moodShift) % 100;
     int jazznetNotes[32], jazznetSize = 0;
     bool useJazznet = false;
     char filename[128];
@@ -428,7 +458,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   lastTargetNotesCount = currentChordNotesCount;
 }
 
-void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
+void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood) {
     if (chordIdx < 0 || chordIdx >= 6) return;
     ENSEMBLE_LOCK();
     int slot = -1;
@@ -452,6 +482,7 @@ void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensi
         ensemble.peers[slot].latitude = lat; ensemble.peers[slot].longitude = lon;
         ensemble.peers[slot].currentKeyOffset = keyOffset;
         ensemble.peers[slot].listening = listening;
+        ensemble.peers[slot].mood = (EnsembleMood)mood;
         int macSum = 0; for(int i=0; i<6; i++) macSum += mac[i];
         ensemble.peers[slot].role = (MusicalRole)(macSum % 3);
         ensemble.peers[slot].lastSeen = millis();
@@ -462,8 +493,8 @@ void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensi
 
 void playChordProgression(const EVContext& context, int currentBaseNote) { engine.process(context, currentBaseNote); }
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote) { engine.ensemble = ensemble; engine.process(context, currentBaseNote); }
-void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening) {
-    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening);
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening, mood);
 }
 void setLocalRole(MusicalRole role) { engine.localRole = role; }
 void logEnsembleStatus() {
@@ -483,6 +514,8 @@ void logEnsembleStatus() {
 }
 int getCurrentChordIdx() { return engine.theory.currentChordIdx; }
 int getCurrentKeyOffset() { return engine.ensemble.ensembleKeyOffset; }
+
+int getCurrentMood() { return (int)engine.theory.localMood; }
 
 int predictError(int currentError) {
     static int lastError = 0;
