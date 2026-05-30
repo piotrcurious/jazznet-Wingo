@@ -60,6 +60,7 @@ struct EVContext {
 
 // Ensemble Dynamics
 enum MusicalRole { ROLE_LEAD, ROLE_COMPING, ROLE_BASS };
+enum EnsembleMood { MOOD_RESOLUTION, MOOD_TENSION, MOOD_DISCOVERY };
 
 struct PeerState {
     uint8_t macAddr[6];
@@ -81,7 +82,9 @@ struct EnsembleContext {
     PeerState peers[4];
     int peerCount;
     int collectiveTension;
-    int ensembleKeyOffset; // -6 to +6 relative to local baseNote
+    int ensembleKeyOffset;
+    EnsembleMood currentMood;
+    int moodStability;
     bool inCallAndResponse;
     int callAndResponseTicks;
 };
@@ -100,6 +103,7 @@ struct PsychoacousticPrediction {
 
 struct TheoryPredictor {
     int currentChordIdx;
+    EnsembleMood localMood;
     TheoryPrediction predict(const EVContext& context, const EnsembleContext& ensemble);
 };
 

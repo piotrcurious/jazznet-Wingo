@@ -67,10 +67,11 @@ void initEnsembleMutex() {
 #endif
 }
 
-static CorrelationEngine engine = {{2}, {0, 0}, {}, {}, ROLE_COMPING};
+static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
+    engine.theory.localMood = MOOD_RESOLUTION;
     engine.psycho.previousError = 0;
     engine.psycho.trend = 0;
     engine.ensemble.peerCount = 0;
@@ -90,6 +91,18 @@ bool isDissonant(int note, const int* contextNotes, int contextNotesCount) {
 }
 
 TheoryPrediction TheoryPredictor::predict(const EVContext& context, const EnsembleContext& ensemble) {
+    // HMM-inspired mood transition
+    if (ensemble.peerCount > 0) {
+        int tensionCount = 0;
+        for(int i=0; i<4; i++) if(ensemble.peers[i].active && ensemble.peers[i].intensity > 90) tensionCount++;
+
+        if (tensionCount > ensemble.peerCount / 2) {
+            if (random(0,100) < 40) localMood = MOOD_TENSION;
+        } else if (tensionCount == 0) {
+            if (random(0,100) < 30) localMood = MOOD_RESOLUTION;
+        }
+    }
+
     int nextChordIdx = currentChordIdx;
     int r = random(0, 100);
     int cumulative = 0;
@@ -152,6 +165,10 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
     if (!found) nextChordIdx = random(0, 6);
 
     int tensions[] = {50, 90, 10, 40, 70, 30};
+    // Adjust based on mood
+    if (localMood == MOOD_TENSION) tensions[nextChordIdx] += 20;
+    else if (localMood == MOOD_RESOLUTION) tensions[nextChordIdx] -= 10;
+
     int harmonyTension = tensions[nextChordIdx];
     if (context.speed > 90 && (nextChordIdx == 2 || nextChordIdx == 5)) {
         harmonyTension += 30;
@@ -233,6 +250,19 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     ENSEMBLE_LOCK();
     cleanupPeers();
 
+    // Leadership Handover Dynamics
+    if (ensemble.peerCount > 0) {
+        bool peerHigherIntensity = false;
+        for(int i=0; i<4; i++) {
+            if(ensemble.peers[i].active && ensemble.peers[i].intensity > context.throttle + 20) {
+                peerHigherIntensity = true;
+                break;
+            }
+        }
+        if (peerHigherIntensity && random(0,100) < 10) localRole = ROLE_COMPING; // Yield to more intense peer
+        else if (!peerHigherIntensity && context.throttle > 100 && random(0,100) < 10) localRole = ROLE_LEAD; // Take lead
+    }
+
     if (ensemble.peerCount > 0) {
         int targetKeyOffset = 0;
         int activePeersCount = 0;
@@ -244,7 +274,7 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         }
         if (activePeersCount > 0) {
             targetKeyOffset /= activePeersCount;
-            if (random(0, 100) < 5) {
+            if (random(0, 100) < 30) {
                 if (ensemble.ensembleKeyOffset < targetKeyOffset) ensemble.ensembleKeyOffset++;
                 else if (ensemble.ensembleKeyOffset > targetKeyOffset) ensemble.ensembleKeyOffset--;
             }
@@ -312,7 +342,16 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
         modeStr = "seventh-chord";
     }
 
-    snprintf(filename, sizeof(filename), "jazznet/%s/%s/C-4-%s-0_0.CSV", typeStr, modeStr, modeStr);
+    // Deepen mood integration for Jazznet
+    if (theory.localMood == MOOD_TENSION) {
+        typeStr = "arpeggio";
+        modeStr = "diminished";
+    } else if (theory.localMood == MOOD_DISCOVERY) {
+        typeStr = "scale";
+        modeStr = "lydian";
+    }
+
+    snprintf(filename, sizeof(filename), "jazznet/P%d.CSV", patternIdx);
 
     if (context.satellites >= 3) {
         loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32);
@@ -334,7 +373,7 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
     auto playVariedChordLocal = [&](const int* baseChord, int size, int trans, int vel, int novelty) {
         int variedChord[MAX_NOTES_PER_CHORD];
         int count = 0;
-        for (int i = 0; i < size && count < MAX_NOTES_PER_CHORD; ++i) {
+        int maxNotesAllowed = MAX_NOTES_PER_CHORD; if (ensemble.peerCount >= 2) maxNotesAllowed = 3; if (ensemble.peerCount >= 4) maxNotesAllowed = 2; for (int i = 0; i < size && count < maxNotesAllowed; ++i) {
             int note = baseChord[i];
             if (random(0, 100) < novelty) {
                 int choice = random(0, 3);
@@ -469,12 +508,17 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
     targetCenter = sum / lastTargetNotesCount;
   }
 
+  int minOct = 3, maxOct = 6;
+  if (engine.localRole == ROLE_BASS) { minOct = 2; maxOct = 4; }
+  else if (engine.localRole == ROLE_LEAD) { minOct = 5; maxOct = 8; }
+  else if (engine.localRole == ROLE_COMPING) { minOct = 4; maxOct = 6; }
+
   for (int i = 0; i < chordDefSize && currentChordNotesCount < MAX_NOTES_PER_CHORD; ++i) {
     int noteBase = (chordDefinition[i] + transpositionOffset) % 12;
 
     int bestNote = -1;
     int minDiff = 128;
-    for (int octave = 3; octave <= 6; ++octave) {
+    for (int octave = minOct; octave <= maxOct; ++octave) {
       int candidate = noteBase + octave * 12;
       int diff = abs(candidate - targetCenter);
       if (diff < minDiff) {

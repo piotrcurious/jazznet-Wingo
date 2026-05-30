@@ -65,7 +65,8 @@ inline int analogRead(int pin) { return 0; }
 inline void pinMode(int pin, int mode) {}
 inline void digitalWrite(int pin, int val) {}
 inline void delay(int ms) {
-    usleep(ms * 1000);
+    // skip sleep in tests to avoid timeouts
+    // usleep(ms * 1000);
 }
 
 inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
@@ -81,7 +82,7 @@ inline T constrain(T mvg, L lo, H hi) {
 inline long random(long min, long max) {
     static bool seeded = false;
     if (!seeded) {
-        srand(time(NULL));
+        srand(42);
         seeded = true;
     }
     if (max == min) return min;
