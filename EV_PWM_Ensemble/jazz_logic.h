@@ -72,6 +72,7 @@ struct PeerState {
     double longitude;
     MusicalRole role;
     int currentKeyOffset;
+    EnsembleMood mood;
     bool listening;
     long firstSeen;
     long lastSeen;
@@ -125,7 +126,7 @@ struct CorrelationEngine {
     MusicalRole localRole;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
+    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood);
 
 private:
     void cleanupPeers();
@@ -141,11 +142,12 @@ bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
 void initEnsembleMutex();
-void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening);
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood);
 void setLocalRole(MusicalRole role);
 void logEnsembleStatus();
 int getCurrentChordIdx();
 int getCurrentKeyOffset();
+int getCurrentMood();
 bool isLocalListening();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);

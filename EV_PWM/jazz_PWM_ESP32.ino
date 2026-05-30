@@ -33,6 +33,7 @@ typedef struct struct_message {
     int dissonance;
     int speed;
     int keyOffset;
+    int mood;
     bool listening;
     double latitude;
     double longitude;
@@ -43,7 +44,7 @@ struct_message myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     if (len == sizeof(struct_message)) {
         struct_message* msg = (struct_message*)incomingData;
-        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed, msg->latitude, msg->longitude, msg->keyOffset, msg->listening);
+        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed, msg->latitude, msg->longitude, msg->keyOffset, msg->listening, msg->mood);
     }
 }
 
@@ -125,6 +126,7 @@ void loop() {
     myData.dissonance = currentError;
     myData.speed = speed;
     myData.keyOffset = getCurrentKeyOffset();
+    myData.mood = getCurrentMood();
     myData.listening = isLocalListening();
     myData.latitude = latitude;
     myData.longitude = longitude;

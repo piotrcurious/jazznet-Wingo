@@ -47,7 +47,7 @@ void test_ensemble_logic() {
     int soloVelocity = 0;
     for (auto& e : MIDI.events) if (e.on) { soloVelocity = e.velocity; break; }
     const uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false);
+    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false, 0);
     MIDI.events.clear();
     playChordProgression(ctxSolo, 60);
     int ensembleVelocity = 0;
@@ -60,7 +60,7 @@ void test_key_alignment() {
     std::cout << "Testing key alignment..." << std::endl;
     resetImprovisation();
     const uint8_t peer[6] = {0x3, 0x3, 0x3, 0x3, 0x3, 0x3};
-    updateEnsemblePeer(peer, 1, 100, 0, 0, 0.0, 0.0, 2, false);
+    updateEnsemblePeer(peer, 1, 100, 0, 0, 0.0, 0.0, 2, false, 0);
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     for(int i=0; i<1000; i++) playChordProgression(ctx, 60);
     int finalKey = getCurrentKeyOffset();
@@ -87,7 +87,7 @@ void test_density_adaptation() {
     resetImprovisation();
     for (int i = 0; i < 4; i++) {
         uint8_t mac[6] = {0, 0, 0, 0, 0, (uint8_t)(i + 10)};
-        updateEnsemblePeer(mac, 1, 100, 0, 0, 0.0, 0.0, 0, false);
+        updateEnsemblePeer(mac, 1, 100, 0, 0, 0.0, 0.0, 0, false, 0);
     }
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     MIDI.events.clear();
