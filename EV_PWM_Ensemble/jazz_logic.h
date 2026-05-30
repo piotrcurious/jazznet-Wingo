@@ -130,7 +130,7 @@ struct CorrelationEngine {
 private:
     void cleanupPeers();
     int calculateTransposition(const EVContext& context, int baseNote);
-    void performMusicalLogic(const EVContext& context, const PsychoacousticPrediction& pp, const TheoryPrediction& tp, int transOffset);
+    void performMusicalLogic(const EVContext& context, const PsychoacousticPrediction& pp, const TheoryPrediction& tp, int transOffset, const EnsembleContext& ensSnap);
 };
 
 // Functions

@@ -106,27 +106,25 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
             if (ensemble.peers[i].active) {
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
-                    long activeDuration = now - ensemble.peers[i].firstSeen;
-                    int trustBonus = map(constrain(activeDuration, 0, 30000), 0, 30000, 0, 10);
+                    long activeSec = (now - ensemble.peers[i].firstSeen) / 1000;
+                    int trustBonus = (activeSec > 30) ? 15 : (int)(activeSec / 2);
                     double dl = context.latitude - ensemble.peers[i].latitude;
                     double dg = context.longitude - ensemble.peers[i].longitude;
                     long distSq = (long)((dl*dl + dg*dg) * 1000000);
-                    int distanceScale = map(constrain(distSq, 0, 1000), 0, 1000, 20, 5);
-                    int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 20);
-                    int baseWeight = (10 + leadership + trustBonus) * distanceScale / 10;
+                    int distanceScale = map(constrain(distSq, 0, 1000), 0, 1000, 25, 5);
+                    int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 25);
+                    int baseWeight = (12 + leadership + trustBonus) * distanceScale / 10;
                     ensembleInfluence[peerChord] += baseWeight;
-                    ensembleInfluence[(peerChord + 1) % 6] += baseWeight / 3;
-                    ensembleInfluence[(peerChord + 5) % 6] += baseWeight / 3;
+                    ensembleInfluence[(peerChord + 1) % 6] += baseWeight / 2;
+                    ensembleInfluence[(peerChord + 5) % 6] += baseWeight / 2;
                 }
             }
         }
     }
 
-    int entropy = map(context.speed, 0, 127, 0, 40) + map(context.altitude % 1000, 0, 999, 0, 30);
     int totalWeight = 0;
     for (int i = 0; i < 6; ++i) totalWeight += transitionMatrix[currentChordIdx][i] + ensembleInfluence[i];
     int r = random(0, totalWeight);
-    if (entropy > 20) r = (r + entropy) % totalWeight;
 
     bool found = false;
     for (int i = 0; i < 6; ++i) {
@@ -149,17 +147,17 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
 }
 
 PsychoacousticPrediction EnsemblePredictor::predict(const EVContext& context, const EnsembleContext& ensemble) {
-    int collectiveDissonance = 0, collectiveIntensity = 0, activePeers = 0;
+    int collectiveDissonance = 0, collectiveIntensity = 0, activePeersCount = 0;
     for (int i = 0; i < 4; i++) {
         if (ensemble.peers[i].active) {
             collectiveIntensity += ensemble.peers[i].intensity;
             collectiveDissonance += ensemble.peers[i].dissonance;
-            activePeers++;
+            activePeersCount++;
         }
     }
-    if (activePeers > 0) {
-        collectiveIntensity /= activePeers;
-        collectiveDissonance /= activePeers;
+    if (activePeersCount > 0) {
+        collectiveIntensity /= activePeersCount;
+        collectiveDissonance /= activePeersCount;
     }
     return {collectiveDissonance, collectiveIntensity, 0};
 }
@@ -271,13 +269,19 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
     bool useJazznet = false;
     char filename[128];
     const char *typeStr = "chord", *modeStr = "maj7-chord";
-    if (pp.perceivedDissonance > 75) { typeStr = "scale"; modeStr = "locrian"; }
-    else if (pp.perceivedDissonance > 50) { typeStr = "arpeggio"; modeStr = "min7-arpeggio"; }
-    else if (tp.harmonyTension > 60) { typeStr = "chord"; modeStr = "seventh-chord"; }
-    if (theory.localMood == MOOD_TENSION) { typeStr = "arpeggio"; modeStr = "dimidished"; }
-    else if (theory.localMood == MOOD_DISCOVERY) { typeStr = "scale"; modeStr = "lydian"; }
 
-    snprintf(filename, sizeof(filename), "jazznet/P%d.CSV", patternIdx);
+    // Orchestral Role Specialization
+    if (localRole == ROLE_BASS) typeStr = "arpeggio";
+    else if (localRole == ROLE_LEAD) typeStr = (random(0,100) < 50) ? "scale" : "progression";
+
+    if (pp.perceivedDissonance > 75) { modeStr = "locrian"; }
+    else if (pp.perceivedDissonance > 50) { modeStr = "min7-arpeggio"; }
+    else if (tp.harmonyTension > 60) { modeStr = "seventh-chord"; }
+
+    if (theory.localMood == MOOD_TENSION) { modeStr = "diminished"; }
+    else if (theory.localMood == MOOD_DISCOVERY) { modeStr = "lydian"; }
+
+    snprintf(filename, sizeof(filename), "jazznet/%s/%s/C-4-%s-0_0.CSV", typeStr, modeStr, modeStr);
     if (context.satellites >= 3) {
         loadPatternFromSD(filename, jazznetNotes, &jazznetSize, 32);
         useJazznet = (jazznetSize > 0);
