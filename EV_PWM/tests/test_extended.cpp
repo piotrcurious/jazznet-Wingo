@@ -47,7 +47,7 @@ void test_ensemble_logic() {
     int soloVelocity = 0;
     for (auto& e : MIDI.events) if (e.on) { soloVelocity = e.velocity; break; }
     const uint8_t peerMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false, 0);
+    updateEnsemblePeer(peerMac, 1, 127, 127, 60, 0.0, 0.0, 0, false, 0, 0);
     MIDI.events.clear();
     playChordProgression(ctxSolo, 60);
     int ensembleVelocity = 0;
@@ -60,7 +60,7 @@ void test_key_alignment() {
     std::cout << "Testing key alignment..." << std::endl;
     resetImprovisation();
     const uint8_t peer[6] = {0x3, 0x3, 0x3, 0x3, 0x3, 0x3};
-    updateEnsemblePeer(peer, 1, 100, 0, 0, 0.0, 0.0, 2, false, 0);
+    updateEnsemblePeer(peer, 1, 100, 0, 0, 0.0, 0.0, 2, false, 0, 0);
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     for(int i=0; i<1000; i++) playChordProgression(ctx, 60);
     int finalKey = getCurrentKeyOffset();
@@ -82,12 +82,37 @@ void test_role_registers() {
     std::cout << "Role registers test passed!" << std::endl;
 }
 
+void test_dissonance_correction() {
+    std::cout << "Testing dissonance correction..." << std::endl;
+    resetImprovisation();
+    setLocalRole(ROLE_COMPING);
+    // Peer playing 61 (C#)
+    const uint8_t peer[6] = {0x1, 0x1, 0x1, 0x1, 0x1, 0x1};
+    // Chord idx 0 (Dm7: 62, 65, 69, 72) with trans -1 to make it play 61
+    updateEnsemblePeer(peer, 0, 100, 0, 0, 0.0, 0.0, -1, false, 0, 0);
+
+    MIDI.events.clear();
+    // We try to play C (60), which clashes with peer 61 (pitch class 1)
+    int Cmajor[] = {0};
+    sendChord(Cmajor, 1, 60, 100);
+
+    for (auto& e : MIDI.events) {
+        if (e.on) {
+            // Should not be 60 or 61 (which are clashing with peer 61)
+            assert(e.note != 60);
+            assert(e.note != 61);
+        }
+    }
+    assert(getLocalClashRate() > 0);
+    std::cout << "Dissonance correction test passed!" << std::endl;
+}
+
 void test_density_adaptation() {
     std::cout << "Testing density adaptation..." << std::endl;
     resetImprovisation();
     for (int i = 0; i < 4; i++) {
         uint8_t mac[6] = {0, 0, 0, 0, 0, (uint8_t)(i + 10)};
-        updateEnsemblePeer(mac, 1, 100, 0, 0, 0.0, 0.0, 0, false, 0);
+        updateEnsemblePeer(mac, 1, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0);
     }
     EVContext ctx = {50, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
     MIDI.events.clear();
@@ -99,6 +124,20 @@ void test_density_adaptation() {
     std::cout << "Density adaptation test passed!" << std::endl;
 }
 
+void test_awareness_adaptation() {
+    std::cout << "Testing awareness adaptation..." << std::endl;
+    resetImprovisation();
+    // Simulate high clash rate
+    for(int i=0; i<20; i++) {
+        const uint8_t peer[6] = {0x1, 0x1, 0x1, 0x1, 0x1, 0x1};
+        updateEnsemblePeer(peer, 0, 100, 0, 0, 0.0, 0.0, -1, false, 0, 80);
+        int Cmajor[] = {0};
+        sendChord(Cmajor, 1, 60, 100);
+    }
+    assert(getLocalConfidence() < 0.8f);
+    std::cout << "Awareness adaptation test passed!" << std::endl;
+}
+
 int main() {
     test_isDissonant_extended();
     test_chord_filtering();
@@ -107,6 +146,8 @@ int main() {
     test_key_alignment();
     test_role_registers();
     test_density_adaptation();
+    test_dissonance_correction();
+    test_awareness_adaptation();
     std::cout << "Extended tests passed!" << std::endl;
     return 0;
 }

@@ -74,6 +74,7 @@ struct PeerState {
     int currentKeyOffset;
     EnsembleMood mood;
     bool listening;
+    int clashRate; // 0-100 awareness metric
     long firstSeen;
     long lastSeen;
     bool active;
@@ -88,6 +89,16 @@ struct EnsembleContext {
     int moodStability;
     bool inCallAndResponse;
     int callAndResponseTicks;
+};
+
+// Self-Awareness layers
+struct SelfAwarenessState {
+    int internalDissonance;  // 0-100: current self-detected dissonance
+    int peerClashRate;       // 0-100: frequency of note clashes with peers
+    int moodAlignment;       // 0-100: how well local mood matches ensemble
+    int selfCorrectionCount; // running total of avoidant corrections
+    float confidence;        // 0.0 - 1.0: overall performance confidence
+    bool inAvoidantCorrection; // flag indicating active correction
 };
 
 // Predictors and Engine
@@ -124,9 +135,10 @@ struct CorrelationEngine {
     EnsemblePredictor ensemblePredictor;
     EnsembleContext ensemble;
     MusicalRole localRole;
+    SelfAwarenessState awareness;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood);
+    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate);
 
 private:
     void cleanupPeers();
@@ -142,13 +154,15 @@ bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
 void initEnsembleMutex();
-void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood);
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate);
 void setLocalRole(MusicalRole role);
 void logEnsembleStatus();
 int getCurrentChordIdx();
 int getCurrentKeyOffset();
 int getCurrentMood();
 bool isLocalListening();
+float getLocalConfidence();
+int getLocalClashRate();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
 void sendMIDINoteOffWrapper(int note);
