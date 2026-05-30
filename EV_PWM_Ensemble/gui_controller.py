@@ -123,8 +123,8 @@ class MIDIController:
     def update_peer(self, idx):
         if not self.running: return
         val = int(float(self.peer_data[idx].get()))
-        # Send simulated peer data: p[id],[chord],[int],[diss],[speed],[lat],[lon],[key],[list]
-        self.send_cmd(f"p{idx+1},", f"1,{val},0,0,0.0,0.0,0,0")
+        # Send simulated peer data: p[id],[chord],[int],[diss],[speed],[lat],[lon],[key],[list],[mood],[clash]
+        self.send_cmd(f"p{idx+1},", f"1,{val},0,0,0.0,0.0,0,0,0,0")
 
     def refresh_ports(self):
         self.available_ports = []
