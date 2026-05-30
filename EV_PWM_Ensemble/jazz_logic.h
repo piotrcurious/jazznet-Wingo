@@ -103,6 +103,7 @@ struct SelfAwarenessState {
     int boredom;             // 0-100: repetitiveness of output
     int lastChordIdx;
     int chordRepetitionCount;
+    int flowState;           // 0-100: sustained confidence
 };
 
 // Predictors and Engine

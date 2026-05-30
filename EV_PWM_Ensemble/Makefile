@@ -2,7 +2,7 @@ CXX = g++
 CXXFLAGS = -I. -Itests
 LDFLAGS = -ldl
 
-all: tests/runner tests/gui_bridge tests/test_extended tests/test_stress tests/test_social
+all: tests/runner tests/gui_bridge tests/test_extended tests/test_stress tests/test_social tests/test_harmony tests/test_ensemble_dynamics tests/test_geo_awareness tests/test_concurrency
 
 tests/runner: tests/test_main.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
 	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
@@ -19,7 +19,19 @@ tests/test_stress: tests/test_stress.cpp jazz_logic.cpp tests/alsa_midi_client.c
 tests/test_social: tests/test_social.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
 	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
 
+tests/test_harmony: tests/test_harmony.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
+	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
+
+tests/test_ensemble_dynamics: tests/test_ensemble_dynamics.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
+	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
+
+tests/test_geo_awareness: tests/test_geo_awareness.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
+	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
+
+tests/test_concurrency: tests/test_concurrency.cpp jazz_logic.cpp tests/alsa_midi_client.cpp
+	$(CXX) $(CXXFLAGS) -DMOCK_TESTING -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -f tests/runner tests/gui_bridge tests/test_extended tests/test_stress tests/test_social progression.mid
+	rm -f tests/runner tests/gui_bridge tests/test_extended tests/test_stress tests/test_social tests/test_harmony tests/test_ensemble_dynamics tests/test_geo_awareness tests/test_concurrency progression.mid
 
 .PHONY: all clean

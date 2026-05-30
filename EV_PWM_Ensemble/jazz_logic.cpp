@@ -65,7 +65,7 @@ void initEnsembleMutex() {
 #endif
 }
 
-static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false, 100, 0, 2, 0}};
+static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false, 100, 0, 2, 0, 0}};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
@@ -149,7 +149,7 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
             }
         }
         // Social Harmonic Entrainment: resolve collective ii-V or IV-V to I
-        if (peerChordVotes[1] > 0 && (peerChordVotes[0] > 0 || peerChordVotes[3] > 0)) ensembleInfluence[2] += 40;
+        if (peerChordVotes[1] > 0 && (peerChordVotes[0] > 0 || peerChordVotes[3] > 0)) ensembleInfluence[2] += 200;
     }
 
     int totalWeight = 0;
@@ -226,7 +226,7 @@ int CorrelationEngine::calculateTransposition(const EVContext& context, int base
     int altitudeOffset = (context.altitude / 100);
     int speedOffset = map(context.speed, 0, 127, -12, 12);
     // Data-Aware Transposition: if data quality is low, reduce influence of heading/altitude
-    int geoWeight = (awareness.dataQuality > 50) ? 10 : 2;
+    int geoWeight = (awareness.dataQuality > 60) ? 10 : 2;
     int transpositionOffset = (baseNote + ensemble.ensembleKeyOffset - 60) + (headingOffset * geoWeight / 10) + (altitudeOffset * geoWeight / 10) + speedOffset;
     if (localRole == ROLE_BASS) transpositionOffset -= 12;
     else if (localRole == ROLE_LEAD) transpositionOffset += 12;
@@ -308,17 +308,31 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     // Reflective Awareness: Evaluate alignment and update confidence
     if (ensemble.peerCount > 0) {
         int moodSum = 0;
-        for (int i = 0; i < 4; i++) if (ensemble.peers[i].active) moodSum += (int)ensemble.peers[i].mood;
+        int totalPeerClashRate = 0;
+        for (int i = 0; i < 4; i++) {
+            if (ensemble.peers[i].active) {
+                moodSum += (int)ensemble.peers[i].mood;
+                totalPeerClashRate += ensemble.peers[i].clashRate;
+            }
+        }
         int avgMood = moodSum / ensemble.peerCount;
         awareness.moodAlignment = 100 - abs((int)theory.localMood - avgMood) * 33;
+
+        // Mutual Confidence: penalized if peers are clashing
+        if (totalPeerClashRate / ensemble.peerCount > 40) awareness.moodAlignment -= 20;
+
     } else {
         awareness.moodAlignment = 100;
     }
 
     // Confidence decreases with clashes, poor alignment, and poor data quality
     float dqScale = awareness.dataQuality / 100.0f;
-    float targetConfidence = (awareness.moodAlignment / 100.0f) * (1.0f - awareness.peerClashRate / 150.0f) * (0.5f + dqScale * 0.5f);
-    awareness.confidence = (awareness.confidence * 0.9f) + (targetConfidence * 0.1f);
+    float targetConfidence = (awareness.moodAlignment / 100.0f) * (1.0f - awareness.peerClashRate / 150.0f);
+    awareness.confidence = (awareness.confidence * 0.9f) + (constrain(targetConfidence, 0.0f, 1.0f) * 0.1f);
+
+    // Flow State: sustained high confidence
+    if (awareness.confidence > 0.95f) awareness.flowState = (awareness.flowState * 9 + 100) / 10;
+    else awareness.flowState = (awareness.flowState * 8) / 10;
 
     if (ensemble.peerCount > 0) {
         pp.energeticIntensity = (pp.energeticIntensity * 7 + ep.energeticIntensity * 3) / 10;
@@ -396,7 +410,18 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
         for(int i=0; i<4; i++) if(ensSnap.peers[i].active && ensSnap.peers[i].speed > maxPeerSpeed) maxPeerSpeed = ensSnap.peers[i].speed;
         tempoOffset = map(maxPeerSpeed, 0, 127, -50, 50);
     }
-    int actualDelay = constrain(map(100 - pp.energeticIntensity, 0, 100, 200, 800) - tempoOffset, 100, 1200);
+    int baseDelay = map(100 - pp.energeticIntensity, 0, 100, 200, 800);
+
+    // Social Pulse: sync toward peer intensity
+    if (ensSnap.peerCount > 0) {
+        int avgIntensity = 0;
+        for(int i=0; i<4; i++) if(ensSnap.peers[i].active) avgIntensity += ensSnap.peers[i].intensity;
+        avgIntensity /= ensSnap.peerCount;
+        int peerDelay = map(100 - avgIntensity, 0, 100, 200, 800);
+        baseDelay = (baseDelay * 7 + peerDelay * 3) / 10;
+    }
+
+    int actualDelay = constrain(baseDelay - tempoOffset, 100, 1200);
 
     // Adaptive Timing: slow down if confidence is low
     if (awareness.confidence < 0.5f) actualDelay = (int)(actualDelay * 1.5f);
@@ -439,6 +464,9 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
         novelty /= 2;
         if (awareness.peerClashRate > 60) novelty = 0; // Extreme caution
     }
+
+    // Flow State novelty boost
+    if (awareness.flowState > 80) novelty = constrain(novelty + 20, 0, 100);
 
     if (useJazznet) {
         if (localRole == ROLE_COMPING) novelty /= 2;
@@ -552,6 +580,11 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
         minOct--; maxOct++;
     }
 
+    // Flow State: Extreme registers
+    if (engine.awareness.flowState > 80) {
+        minOct--; maxOct++;
+    }
+
   engine.awareness.inAvoidantCorrection = false;
 
   for (int i = 0; i < chordDefSize && currentChordNotesCount < MAX_NOTES_PER_CHORD; ++i) {
@@ -565,7 +598,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
 
     if (bestNote >= 0 && bestNote <= 127) {
       bool localDissonant = isDissonant(bestNote, currentChordNotes, currentChordNotesCount);
-      bool ensembleClash = isDissonant(bestNote % 12, ensembleNotes, ensembleNotesCount); // compare pitch class
+      bool ensembleClash = isDissonant(bestNote, ensembleNotes, ensembleNotesCount);
 
       if (localDissonant || ensembleClash) {
         // Self-Correction: Try shifting by a minor third (3) or fourth (5) to resolve clash
@@ -574,7 +607,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
         for (int c : corrections) {
           int correctedNote = bestNote + c;
           if (!isDissonant(correctedNote, currentChordNotes, currentChordNotesCount) &&
-              !isDissonant(correctedNote % 12, ensembleNotes, ensembleNotesCount)) {
+              !isDissonant(correctedNote, ensembleNotes, ensembleNotesCount)) {
             bestNote = correctedNote;
             fixed = true;
             engine.awareness.selfCorrectionCount++;
