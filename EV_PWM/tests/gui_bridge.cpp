@@ -62,8 +62,10 @@ int main(int argc, char** argv) {
                             if (parts.size() >= 8) {
                                 int chord = std::stoi(parts[0]), intensity = std::stoi(parts[1]), diss = std::stoi(parts[2]), speed = std::stoi(parts[3]);
                                 double lat = std::stod(parts[4]), lon = std::stod(parts[5]);
-                                int key = std::stoi(parts[6]), mood = 0; bool list = std::stoi(parts[7]);
-                                int clash = (parts.size() >= 9) ? std::stoi(parts[8]) : 0;
+                                int key = std::stoi(parts[6]);
+                                bool list = std::stoi(parts[7]);
+                                int mood = (parts.size() >= 9) ? std::stoi(parts[8]) : 0;
+                                int clash = (parts.size() >= 10) ? std::stoi(parts[9]) : 0;
                                 updateEnsemblePeer(mac, chord, intensity, diss, speed, lat, lon, key, list, mood, clash);
                             }
                         }
