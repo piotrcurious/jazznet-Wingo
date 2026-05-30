@@ -105,6 +105,27 @@ class MIDIController:
         )
         ttk.Label(info_frame, text=instructions, justify=tk.LEFT).grid(row=0, column=0)
 
+        # Ensemble Simulation
+        ensemble_frame = ttk.LabelFrame(main_frame, text="Ensemble Simulator", padding="10")
+        ensemble_frame.grid(row=0, column=3, rowspan=7, sticky=(tk.N, tk.S), padx=10)
+
+        self.peer_data = []
+        for i in range(2): # Simulate 2 peers
+            p_frame = ttk.Frame(ensemble_frame, padding="5")
+            p_frame.pack(fill=tk.X)
+            ttk.Label(p_frame, text=f"Peer {i+1} Intensity").pack()
+            s = ttk.Scale(p_frame, from_=0, to=127, orient=tk.HORIZONTAL,
+                          command=lambda v, idx=i: self.update_peer(idx))
+            s.set(80)
+            s.pack(fill=tk.X)
+            self.peer_data.append(s)
+
+    def update_peer(self, idx):
+        if not self.running: return
+        val = int(float(self.peer_data[idx].get()))
+        # Send simulated peer data: p[id],[chord],[int],[diss],[speed],[lat],[lon],[key],[list]
+        self.send_cmd(f"p{idx+1},", f"1,{val},0,0,0.0,0.0,0,0")
+
     def refresh_ports(self):
         self.available_ports = []
         try:
