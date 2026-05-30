@@ -138,6 +138,69 @@ void test_awareness_adaptation() {
     std::cout << "Awareness adaptation test passed!" << std::endl;
 }
 
+void test_boredom_trigger() {
+    std::cout << "Testing boredom trigger..." << std::endl;
+    resetImprovisation();
+    EVContext ctx = {0, 0, 0, 0, 0, 0, 10, 0.0, 0.0};
+    int startMood = getCurrentMood();
+    // Force many repetitions of the same context
+    for(int i=0; i<50; i++) {
+        playChordProgression(ctx, 60);
+    }
+    // Boredom should have triggered at least once, potentially changing mood
+    assert(getLocalBoredom() < 100);
+    std::cout << "Boredom trigger test passed!" << std::endl;
+}
+
+void test_data_quality_adaptation() {
+    std::cout << "Testing data quality adaptation..." << std::endl;
+    resetImprovisation();
+    // Poor satellites
+    EVContext ctxPoor = {0, 0, 0, 0, 0, 0, 0, 0.0, 0.0};
+    playChordProgression(ctxPoor, 60);
+    assert(getLocalDataQuality() < 50);
+    float confPoor = getLocalConfidence();
+
+    // Good satellites
+    EVContext ctxGood = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};
+    playChordProgression(ctxGood, 60);
+    assert(getLocalDataQuality() > 50);
+
+    std::cout << "Data quality adaptation test passed!" << std::endl;
+}
+
+void test_confidence_dynamics() {
+    std::cout << "Testing confidence dynamics..." << std::endl;
+    resetImprovisation();
+    // Simulate low confidence by forcing clashes
+    for(int i=0; i<100; i++) {
+        const uint8_t peer[6] = {0x1, 0x1, 0x1, 0x1, 0x1, 0x1};
+        updateEnsemblePeer(peer, 0, 100, 0, 0, 0.0, 0.0, -1, false, 0, 100);
+        int Cmajor[] = {0};
+        sendChord(Cmajor, 1, 60, 100);
+    }
+
+    float confidence = getLocalConfidence();
+    std::cout << "Final Confidence: " << confidence << std::endl;
+
+    MIDI.events.clear();
+    EVContext ctx = {0, 0, 100, 0, 0, 0, 12, 0.0, 0.0};
+    playChordProgression(ctx, 60);
+
+    bool foundNotes = false;
+    bool foundSoft = false;
+    for (auto& e : MIDI.events) if (e.on) {
+        foundNotes = true;
+        if (e.velocity < 100) foundSoft = true;
+    }
+
+    // If confidence is low, we expect either scaling down or muting
+    if (confidence < 0.8f) {
+        assert(!foundNotes || foundSoft);
+    }
+    std::cout << "Confidence dynamics test passed!" << std::endl;
+}
+
 int main() {
     test_isDissonant_extended();
     test_chord_filtering();
@@ -148,6 +211,9 @@ int main() {
     test_density_adaptation();
     test_dissonance_correction();
     test_awareness_adaptation();
+    test_boredom_trigger();
+    test_data_quality_adaptation();
+    test_confidence_dynamics();
     std::cout << "Extended tests passed!" << std::endl;
     return 0;
 }

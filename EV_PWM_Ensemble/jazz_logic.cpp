@@ -65,7 +65,7 @@ void initEnsembleMutex() {
 #endif
 }
 
-static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false}};
+static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false, 100, 0, 2, 0}};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
@@ -225,7 +225,9 @@ int CorrelationEngine::calculateTransposition(const EVContext& context, int base
     int headingOffset = map(context.heading % 360, 0, 359, 0, 11);
     int altitudeOffset = (context.altitude / 100);
     int speedOffset = map(context.speed, 0, 127, -12, 12);
-    int transpositionOffset = (baseNote + ensemble.ensembleKeyOffset - 60) + headingOffset + altitudeOffset + speedOffset;
+    // Data-Aware Transposition: if data quality is low, reduce influence of heading/altitude
+    int geoWeight = (awareness.dataQuality > 50) ? 10 : 2;
+    int transpositionOffset = (baseNote + ensemble.ensembleKeyOffset - 60) + (headingOffset * geoWeight / 10) + (altitudeOffset * geoWeight / 10) + speedOffset;
     if (localRole == ROLE_BASS) transpositionOffset -= 12;
     else if (localRole == ROLE_LEAD) transpositionOffset += 12;
     return transpositionOffset;
@@ -237,14 +239,23 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
     if (ensemble.peerCount > 0) {
         bool peerHigherIntensity = false;
+        bool peerNeedsSupport = false;
         for(int i=0; i<4; i++) {
-            if(ensemble.peers[i].active && ensemble.peers[i].intensity > context.throttle + 20) {
-                peerHigherIntensity = true;
-                break;
+            if(ensemble.peers[i].active) {
+                if (ensemble.peers[i].intensity > context.throttle + 20) peerHigherIntensity = true;
+                // Altruistic Awareness: Detect peers with high clash rates
+                if (ensemble.peers[i].clashRate > 50) peerNeedsSupport = true;
             }
         }
-        if (peerHigherIntensity && random(0,100) < 10) localRole = ROLE_COMPING;
-        else if (!peerHigherIntensity && context.throttle > 100 && random(0,100) < 10) localRole = ROLE_LEAD;
+
+        // If a peer is struggling (high clashRate) and we are confident, switch to COMPING to stabilize
+        if (peerNeedsSupport && awareness.confidence > 0.7f && localRole != ROLE_BASS) {
+            localRole = ROLE_COMPING;
+        } else if (peerHigherIntensity && random(0,100) < 10) {
+            localRole = ROLE_COMPING;
+        } else if (!peerHigherIntensity && context.throttle > 100 && random(0,100) < 10) {
+            localRole = ROLE_LEAD;
+        }
 
         int targetKeyOffset = 0, activePeersCount = 0;
         for(int i=0; i<4; i++) {
@@ -265,7 +276,34 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
     TheoryPrediction tp = theory.predict(context, ensemble);
     PsychoacousticPrediction pp = psycho.predict(context);
     PsychoacousticPrediction ep = ensemblePredictor.predict(context, ensemble);
+
+    // Temporal Awareness: Boredom & Repetition tracking
+    if (tp.nextChordIdx == awareness.lastChordIdx) {
+        awareness.chordRepetitionCount++;
+        if (awareness.chordRepetitionCount > 3) {
+            awareness.boredom = (awareness.boredom * 8 + 100) / 10;
+        }
+    } else {
+        awareness.chordRepetitionCount = 0;
+        awareness.boredom = (awareness.boredom * 9) / 10;
+    }
+    awareness.lastChordIdx = tp.nextChordIdx;
+
+    // Trigger state change if bored
+    if (awareness.boredom > 70) {
+        if (theory.localMood == MOOD_RESOLUTION) theory.localMood = MOOD_TENSION;
+        else theory.localMood = MOOD_DISCOVERY;
+        awareness.boredom /= 2;
+        // Forced chord change
+        tp.nextChordIdx = (tp.nextChordIdx + random(1, 5)) % 6;
+    }
+
     theory.currentChordIdx = tp.nextChordIdx;
+
+    // Inward-Looking Awareness: Data Quality assessment
+    int satelliteQuality = map(constrain(context.satellites, 0, 12), 0, 12, 0, 70);
+    int peerStability = (ensemble.peerCount > 0) ? 30 : 0;
+    awareness.dataQuality = satelliteQuality + peerStability;
 
     // Reflective Awareness: Evaluate alignment and update confidence
     if (ensemble.peerCount > 0) {
@@ -277,8 +315,9 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         awareness.moodAlignment = 100;
     }
 
-    // Confidence decreases with clashes and poor alignment
-    float targetConfidence = (awareness.moodAlignment / 100.0f) * (1.0f - awareness.peerClashRate / 150.0f);
+    // Confidence decreases with clashes, poor alignment, and poor data quality
+    float dqScale = awareness.dataQuality / 100.0f;
+    float targetConfidence = (awareness.moodAlignment / 100.0f) * (1.0f - awareness.peerClashRate / 150.0f) * (0.5f + dqScale * 0.5f);
     awareness.confidence = (awareness.confidence * 0.9f) + (targetConfidence * 0.1f);
 
     if (ensemble.peerCount > 0) {
@@ -343,7 +382,14 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
     }
 
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
-    if (localRole == ROLE_BASS) velocity = constrain(velocity + 15, 60, 127);
+
+    // Confidence-Weighted Dynamics: softer if uncertain, slightly louder if confident
+    velocity = (int)(velocity * (0.5f + awareness.confidence * 0.5f));
+
+    // Panic Suppression: Mute if confidence is extremely low
+    if (awareness.confidence < 0.2f && random(0,100) < 50) velocity = 0;
+
+    if (localRole == ROLE_BASS) velocity = constrain(velocity + 15, 0, 127);
     int tempoOffset = 0;
     if (ensSnap.peerCount > 0) {
         int maxPeerSpeed = 0;
@@ -359,8 +405,19 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
 
     auto playVariedChordLocal = [&](const int* baseChord, int size, int trans, int vel, int novelty) {
         int maxNotesAllowed = MAX_NOTES_PER_CHORD;
-        if (ensSnap.peerCount >= 2) maxNotesAllowed = 3;
-        if (ensSnap.peerCount >= 4) maxNotesAllowed = 2;
+
+        bool peerNeedsSupport = false;
+        for(int i=0; i<4; i++) if(ensSnap.peers[i].active && ensSnap.peers[i].clashRate > 50) peerNeedsSupport = true;
+
+        // Altruistic adaptation: if supporting, simplify output further
+        if (peerNeedsSupport && awareness.confidence > 0.7f) {
+            maxNotesAllowed = 2;
+            novelty = 0; // Purest harmony for support
+        } else {
+            if (ensSnap.peerCount >= 2) maxNotesAllowed = 3;
+            if (ensSnap.peerCount >= 4) maxNotesAllowed = 2;
+        }
+
         int variedChord[MAX_NOTES_PER_CHORD], count = 0;
         for (int i = 0; i < size && count < maxNotesAllowed; ++i) {
             int note = baseChord[i];
@@ -490,6 +547,11 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   else if (engine.localRole == ROLE_LEAD) { minOct = 5; maxOct = 8; }
   else if (engine.localRole == ROLE_COMPING) { minOct = 4; maxOct = 6; }
 
+    // Virtuosity: Expand registers if very confident and not bored
+    if (engine.awareness.confidence > 0.9f && engine.awareness.boredom < 20) {
+        minOct--; maxOct++;
+    }
+
   engine.awareness.inAvoidantCorrection = false;
 
   for (int i = 0; i < chordDefSize && currentChordNotesCount < MAX_NOTES_PER_CHORD; ++i) {
@@ -604,6 +666,8 @@ int getCurrentKeyOffset() { return engine.ensemble.ensembleKeyOffset; }
 int getCurrentMood() { return (int)engine.theory.localMood; }
 float getLocalConfidence() { return engine.awareness.confidence; }
 int getLocalClashRate() { return engine.awareness.peerClashRate; }
+int getLocalBoredom() { return engine.awareness.boredom; }
+int getLocalDataQuality() { return engine.awareness.dataQuality; }
 
 int predictError(int currentError) {
     static int lastError = 0;

@@ -36,6 +36,8 @@ typedef struct struct_message {
     int mood;
     bool listening;
     int clashRate;
+    int boredom;
+    int dataQuality;
     double latitude;
     double longitude;
 } struct_message;
@@ -130,6 +132,8 @@ void loop() {
     myData.mood = getCurrentMood();
     myData.listening = isLocalListening();
     myData.clashRate = getLocalClashRate();
+    myData.boredom = getLocalBoredom();
+    myData.dataQuality = getLocalDataQuality();
     myData.latitude = latitude;
     myData.longitude = longitude;
     esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));

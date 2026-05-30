@@ -99,6 +99,10 @@ struct SelfAwarenessState {
     int selfCorrectionCount; // running total of avoidant corrections
     float confidence;        // 0.0 - 1.0: overall performance confidence
     bool inAvoidantCorrection; // flag indicating active correction
+    int dataQuality;         // 0-100: GPS + Networking stability
+    int boredom;             // 0-100: repetitiveness of output
+    int lastChordIdx;
+    int chordRepetitionCount;
 };
 
 // Predictors and Engine
@@ -163,6 +167,8 @@ int getCurrentMood();
 bool isLocalListening();
 float getLocalConfidence();
 int getLocalClashRate();
+int getLocalBoredom();
+int getLocalDataQuality();
 void resetImprovisation();
 void sendMIDINoteOnWrapper(int note, int velocity = 127);
 void sendMIDINoteOffWrapper(int note);
