@@ -12,7 +12,7 @@ void test_peer_overflow_replacement() {
     // Add 4 peers
     for (int i = 0; i < 4; i++) {
         uint8_t mac[6] = {0, 0, 0, 0, 0, (uint8_t)(i + 1)};
-        updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0);
+        updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 0);
         // Ensure they have different lastSeen by tiny delays if possible,
         // but here we just rely on order in updatePeer.
     }
@@ -23,7 +23,7 @@ void test_peer_overflow_replacement() {
 
     // Add a 5th peer - should replace the "oldest"
     uint8_t mac5[6] = {0, 0, 0, 0, 0, 5};
-    updateEnsemblePeer(mac5, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0);
+    updateEnsemblePeer(mac5, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 0);
 
     // One of the first 4 should be gone.
     // We can't easily check which one without exposing the peers array,
@@ -37,7 +37,7 @@ void test_rapid_cleanup() {
     std::cout << "Testing rapid cleanup..." << std::endl;
     resetImprovisation();
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 0);
 
     EVContext ctx = {0, 0, 0, 0, 0, 0, 10, 0.0, 0.0};
     playChordProgression(ctx, 60); // This calls cleanupPeers internally

@@ -11,7 +11,7 @@ void peer_updater() {
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
     int i = 0;
     while (running) {
-        updateEnsemblePeer(mac, i % 6, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0);
+        updateEnsemblePeer(mac, i % 6, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 0);
         i++;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
