@@ -38,6 +38,7 @@ typedef struct struct_message {
     int clashRate;
     int boredom;
     int dataQuality;
+    int phase;
     double latitude;
     double longitude;
 } struct_message;
@@ -47,7 +48,7 @@ struct_message myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     if (len == sizeof(struct_message)) {
         struct_message* msg = (struct_message*)incomingData;
-        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed, msg->latitude, msg->longitude, msg->keyOffset, msg->listening, msg->mood, msg->clashRate);
+        updateEnsemblePeer((uint8_t*)mac, msg->currentChordIdx, msg->intensity, msg->dissonance, msg->speed, msg->latitude, msg->longitude, msg->keyOffset, msg->listening, msg->mood, msg->clashRate, msg->phase);
     }
 }
 
@@ -134,6 +135,7 @@ void loop() {
     myData.clashRate = getLocalClashRate();
     myData.boredom = getLocalBoredom();
     myData.dataQuality = getLocalDataQuality();
+    myData.phase = getCurrentPhase();
     myData.latitude = latitude;
     myData.longitude = longitude;
     esp_now_send(NULL, (uint8_t *) &myData, sizeof(myData));
