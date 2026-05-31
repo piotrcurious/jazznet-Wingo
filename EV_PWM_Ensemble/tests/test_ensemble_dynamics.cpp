@@ -17,7 +17,7 @@ void test_mutual_confidence() {
 
     // Peer appears reporting high clashRate
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 90, 0);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 90, 0, false);
 
     for(int i=0; i<20; i++) {
         EVContext ctx = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};

@@ -17,7 +17,7 @@ void test_altruistic_trigger() {
 
     // Peer appears with high clashRate
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 80, 0);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 80, 0, false);
 
     // Process should trigger role change to COMPING
     EVContext ctx = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};
@@ -36,7 +36,7 @@ void test_call_and_response_silence() {
 
     // Peer is "listening" or very intense, triggering call and response
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 120, 0, 100, 0.0, 0.0, 0, true, 0, 0, 0);
+    updateEnsemblePeer(mac, 0, 120, 0, 100, 0.0, 0.0, 0, true, 0, 0, 0, false);
 
     MIDI.events.clear();
     EVContext ctx = {0, 0, 120, 0, 0, 0, 12, 0.0, 0.0};
@@ -53,7 +53,7 @@ void test_mood_convergence() {
 
     // Set peer to TENSION
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, (int)MOOD_TENSION, 0, 0);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, (int)MOOD_TENSION, 0, 0, false);
 
     EVContext ctx = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};
 

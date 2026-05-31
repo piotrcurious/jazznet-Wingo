@@ -76,6 +76,9 @@ struct PeerState {
     bool listening;
     int clashRate; // 0-100 awareness metric
     int phase;     // 0-100 rhythmic position
+    int heartbeatStability; // 0-100: frequency stability
+    bool isSoloing;
+    long lastUpdateInterval;
     long firstSeen;
     long lastSeen;
     bool active;
@@ -106,6 +109,8 @@ struct SelfAwarenessState {
     int chordRepetitionCount;
     int flowState;           // 0-100: sustained confidence
     int currentPhase;        // 0-100 rhythmic progress
+    bool isSoloing;
+    int tacetCounter;        // counts bars of silence
 };
 
 // Predictors and Engine
@@ -145,7 +150,7 @@ struct CorrelationEngine {
     SelfAwarenessState awareness;
 
     void process(const EVContext& context, int baseNote);
-    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase);
+    void updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase, bool isSoloing);
 
 private:
     void cleanupPeers();
@@ -161,7 +166,7 @@ bool loadPatternFromSD(const char* filename, int* patternNotes, int* patternSize
 void playChordProgression(const EVContext& context, int currentBaseNote);
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote);
 void initEnsembleMutex();
-void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase);
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase, bool isSoloing);
 void setLocalRole(MusicalRole role);
 void logEnsembleStatus();
 int getCurrentChordIdx();
@@ -169,6 +174,7 @@ int getCurrentKeyOffset();
 int getCurrentMood();
 bool isLocalListening();
 int getCurrentPhase();
+bool isLocalSoloing();
 float getLocalConfidence();
 int getLocalClashRate();
 int getLocalBoredom();

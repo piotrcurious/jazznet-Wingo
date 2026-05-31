@@ -65,7 +65,7 @@ void initEnsembleMutex() {
 #endif
 }
 
-static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false, 100, 0, 2, 0, 0, 0}};
+static CorrelationEngine engine = {{2, MOOD_RESOLUTION}, {0, 0}, {}, {}, ROLE_COMPING, {0, 0, 0, 0, 1.0f, false, 100, 0, 2, 0, 0, 0, false, 0}};
 
 void resetImprovisation() {
     engine.theory.currentChordIdx = 2;
@@ -95,6 +95,9 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
         int trustedPeers = 0;
         for(int i=0; i<4; i++) {
             if(ensemble.peers[i].active) {
+                // Communication Awareness: ignore peer if heartbeat is unstable
+                if (ensemble.peers[i].heartbeatStability < 40) continue;
+
                 // If a peer is highly dissonant (clashRate), reduce their influence
                 if (ensemble.peers[i].clashRate > 70) continue;
 
@@ -128,8 +131,10 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
         int peerChordVotes[6] = {0, 0, 0, 0, 0, 0};
         for (int i = 0; i < 4; i++) {
             if (ensemble.peers[i].active) {
-                // Influence Gating: Peers with high clash rates have reduced harmonic pull
+                // Influence Gating: Peers with high clash rates or low stability have reduced pull
                 int awarenessGating = map(constrain(ensemble.peers[i].clashRate, 0, 100), 0, 100, 10, 0);
+                int stabilityGating = map(constrain(ensemble.peers[i].heartbeatStability, 0, 100), 0, 100, 0, 10);
+                int combinedGating = (awarenessGating * stabilityGating) / 10;
 
                 int peerChord = ensemble.peers[i].currentChordIdx;
                 if (peerChord >= 0 && peerChord < 6) {
@@ -140,7 +145,7 @@ TheoryPrediction TheoryPredictor::predict(const EVContext& context, const Ensemb
                     long distSq = (long)((dl*dl + dg*dg) * 1000000);
                     int distanceScale = map(constrain(distSq, 0, 1000), 0, 1000, 25, 5);
                     int leadership = map(ensemble.peers[i].intensity, 0, 127, 0, 25);
-                    int baseWeight = (12 + leadership + trustBonus) * distanceScale * awarenessGating / 100;
+                    int baseWeight = (12 + leadership + trustBonus) * distanceScale * combinedGating / 100;
                     ensembleInfluence[peerChord] += baseWeight;
                     ensembleInfluence[(peerChord + 1) % 6] += baseWeight / 2;
                     ensembleInfluence[(peerChord + 5) % 6] += baseWeight / 2;
@@ -250,9 +255,32 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
 
         // Meritocratic Role Dynamics:
         bool currentLeadStruggling = false;
-        for(int i=0; i<4; i++) if(ensemble.peers[i].active && ensemble.peers[i].role == ROLE_LEAD && (ensemble.peers[i].clashRate > 50 || ensemble.peers[i].dissonance > 80)) currentLeadStruggling = true;
+        bool roleConflict = false;
+        uint8_t localMac[6];
+        #ifdef MOCK_TESTING
+        memset(localMac, 0, 6);
+        #else
+        WiFi.macAddress(localMac);
+        #endif
 
-        if (awareness.confidence > 0.9f && currentLeadStruggling && localRole == ROLE_COMPING) {
+        for(int i=0; i<4; i++) {
+            if(ensemble.peers[i].active) {
+                if (ensemble.peers[i].role == ROLE_LEAD && (ensemble.peers[i].clashRate > 50 || ensemble.peers[i].dissonance > 80)) currentLeadStruggling = true;
+
+                // Spatial Role Conflict Resolution:
+                if (ensemble.peers[i].role == localRole) {
+                    double dl = context.latitude - ensemble.peers[i].latitude;
+                    double dg = context.longitude - ensemble.peers[i].longitude;
+                    if (abs(dl) < 0.0001 && abs(dg) < 0.0001) { // within ~10m
+                        if (memcmp(localMac, ensemble.peers[i].macAddr, 6) < 0) roleConflict = true;
+                    }
+                }
+            }
+        }
+
+        if (roleConflict && localRole == ROLE_LEAD) {
+            localRole = ROLE_COMPING; // Yield
+        } else if (awareness.confidence > 0.9f && currentLeadStruggling && localRole == ROLE_COMPING) {
             if (random(0,100) < 20) localRole = ROLE_LEAD; // Take over
         } else if (peerNeedsSupport && awareness.confidence > 0.7f && localRole != ROLE_BASS) {
             localRole = ROLE_COMPING;
@@ -293,6 +321,36 @@ void CorrelationEngine::process(const EVContext& context, int baseNote) {
         awareness.boredom = (awareness.boredom * 9) / 10;
     }
     awareness.lastChordIdx = tp.nextChordIdx;
+
+    // Dialogue Mode: Alternating solo bursts in 2-vehicle ensemble
+    static int dialogueCounter = 0;
+    if (ensemble.peerCount == 1 && awareness.confidence > 0.7f) {
+        dialogueCounter++;
+        if (dialogueCounter > 32) { // roughly every 8 bars
+            awareness.isSoloing = !awareness.isSoloing;
+            dialogueCounter = 0;
+        }
+        // Force variety if soloing
+        if (awareness.isSoloing) awareness.boredom = constrain(awareness.boredom + 5, 0, 100);
+    } else {
+        awareness.isSoloing = (localRole == ROLE_LEAD);
+    }
+
+    // Inhibitory Awareness (Tacet): go silent if sustained high dissonance
+    if (awareness.peerClashRate > 80) {
+        awareness.tacetCounter++;
+        if (awareness.tacetCounter > 5) {
+            // Enter inhibitory state for 4 bars (cycle through counter)
+            if (awareness.tacetCounter < 10) {
+                 pp.energeticIntensity = 0; // Mute
+            } else {
+                 awareness.tacetCounter = 0; // Reset
+                 awareness.peerClashRate = 50; // Cool down
+            }
+        }
+    } else {
+        if (awareness.tacetCounter > 0) awareness.tacetCounter--;
+    }
 
     // Trigger state change if bored
     if (awareness.boredom > 70) {
@@ -412,7 +470,7 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
 
     // Orchestral Role Specialization
     if (localRole == ROLE_BASS) typeStr = "arpeggio";
-    else if (localRole == ROLE_LEAD) typeStr = (random(0,100) < 50) ? "scale" : "progression";
+    else if (awareness.isSoloing) typeStr = (random(0,100) < 50) ? "scale" : "progression";
 
     if (pp.perceivedDissonance > 75) { modeStr = "locrian"; }
     else if (pp.perceivedDissonance > 50) { modeStr = "min7-arpeggio"; }
@@ -428,6 +486,18 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
     }
 
     int velocity = map(pp.energeticIntensity, 0, 100, 30, 120);
+
+    // Auditory Masking Awareness: avoid register clashing with more confident peers
+    if (ensSnap.peerCount > 0 && awareness.confidence < 0.9f) {
+        bool registerConflict = false;
+        for(int i=0; i<4; i++) {
+            if (ensSnap.peers[i].active && ensSnap.peers[i].role == localRole && ensSnap.peers[i].intensity > pp.energeticIntensity) {
+                registerConflict = true;
+                break;
+            }
+        }
+        if (registerConflict) velocity = (int)(velocity * 0.6f);
+    }
 
     // Confidence-Weighted Dynamics: softer if uncertain, slightly louder if confident
     velocity = (int)(velocity * (0.5f + awareness.confidence * 0.5f));
@@ -471,7 +541,20 @@ void CorrelationEngine::performMusicalLogic(const EVContext& context, const Psyc
     // Adaptive Timing: slow down if confidence is low
     if (awareness.confidence < 0.5f) actualDelay = (int)(actualDelay * 1.5f);
 
-    int syncopation = map(pp.rhythmicJitter, 0, 100, 0, actualDelay / 3);
+    // Social Rhythmic Entrainment: COMPING mirrors LEAD jitter
+    int effectiveJitter = pp.rhythmicJitter;
+    if (localRole == ROLE_COMPING && awareness.confidence > 0.7f && ensSnap.peerCount > 0) {
+        for(int i=0; i<4; i++) {
+            if(ensSnap.peers[i].active && ensSnap.peers[i].role == ROLE_LEAD) {
+                // Approximate peer jitter from their speed/intensity if not broadcasted,
+                // but let's assume we want to sync the "groove"
+                effectiveJitter = (pp.rhythmicJitter + 50) / 2; // Bias toward groove
+                break;
+            }
+        }
+    }
+
+    int syncopation = map(effectiveJitter, 0, 100, 0, actualDelay / 3);
 
     auto playVariedChordLocal = [&](const int* baseChord, int size, int trans, int vel, int novelty) {
         int maxNotesAllowed = MAX_NOTES_PER_CHORD;
@@ -684,7 +767,7 @@ void sendChord(const int* chordDefinition, int chordDefSize, int transpositionOf
   engine.awareness.internalDissonance = (currentChordNotesCount < chordDefSize) ? 30 : 0;
 }
 
-void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase) {
+void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase, bool isSoloing) {
     if (chordIdx < 0 || chordIdx >= 6) return;
     ENSEMBLE_LOCK();
     int slot = -1;
@@ -699,7 +782,17 @@ void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensi
         }
     }
     if (slot != -1) {
-        if (!ensemble.peers[slot].active) ensemble.peers[slot].firstSeen = millis();
+        long now = millis();
+        if (!ensemble.peers[slot].active) {
+            ensemble.peers[slot].firstSeen = now;
+            ensemble.peers[slot].heartbeatStability = 100;
+        } else {
+            long interval = now - ensemble.peers[slot].lastSeen;
+            // Target 100ms (10Hz). Stability = 100 - error
+            int stability = 100 - (abs(interval - 100) / 2);
+            ensemble.peers[slot].heartbeatStability = (ensemble.peers[slot].heartbeatStability * 7 + stability * 3) / 10;
+        }
+
         memcpy(ensemble.peers[slot].macAddr, mac, 6);
         ensemble.peers[slot].currentChordIdx = chordIdx;
         ensemble.peers[slot].intensity = intensity;
@@ -711,6 +804,7 @@ void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensi
         ensemble.peers[slot].mood = (EnsembleMood)mood;
         ensemble.peers[slot].clashRate = clashRate;
         ensemble.peers[slot].phase = phase;
+        ensemble.peers[slot].isSoloing = isSoloing;
         int macSum = 0; for(int i=0; i<6; i++) macSum += mac[i];
         ensemble.peers[slot].role = (MusicalRole)(macSum % 3);
         ensemble.peers[slot].lastSeen = millis();
@@ -721,8 +815,8 @@ void CorrelationEngine::updatePeer(const uint8_t* mac, int chordIdx, int intensi
 
 void playChordProgression(const EVContext& context, int currentBaseNote) { engine.process(context, currentBaseNote); }
 void playChordProgressionWithEnsemble(const EVContext& context, const EnsembleContext& ensemble, int currentBaseNote) { engine.ensemble = ensemble; engine.process(context, currentBaseNote); }
-void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase) {
-    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening, mood, clashRate, phase);
+void updateEnsemblePeer(const uint8_t* mac, int chordIdx, int intensity, int dissonance, int speed, double lat, double lon, int keyOffset, bool listening, int mood, int clashRate, int phase, bool isSoloing) {
+    engine.updatePeer(mac, chordIdx, intensity, dissonance, speed, lat, lon, keyOffset, listening, mood, clashRate, phase, isSoloing);
 }
 void setLocalRole(MusicalRole role) { engine.localRole = role; }
 void logEnsembleStatus() {
@@ -758,6 +852,7 @@ int predictError(int currentError) {
 
 bool isLocalListening() { return engine.ensemble.inCallAndResponse; }
 int getCurrentPhase() { return engine.awareness.currentPhase; }
+bool isLocalSoloing() { return engine.awareness.isSoloing; }
 
 void visualFeedback(int intensity) {
 #ifndef MOCK_TESTING

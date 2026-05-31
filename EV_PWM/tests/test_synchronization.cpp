@@ -9,7 +9,7 @@ void test_phase_alignment() {
 
     // Peer is at phase 80
     uint8_t mac[6] = {0, 0, 0, 0, 0, 1};
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 80);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 80, false);
 
     // Local is at phase 0
     // We expect some nudge in delay

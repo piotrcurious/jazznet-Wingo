@@ -10,7 +10,7 @@ void test_collective_cooldown() {
     // Set many peers to high dissonance
     for(int i=0; i<3; i++) {
         uint8_t mac[6] = {0, 0, 0, 0, 0, (uint8_t)(i + 10)};
-        updateEnsemblePeer(mac, 0, 100, 120, 0, 0.0, 0.0, 0, false, 0, 0, 0); // diss = 120
+        updateEnsemblePeer(mac, 0, 100, 120, 0, 0.0, 0.0, 0, false, 0, 0, 0, false); // diss = 120
     }
 
     // Initial local state: TENSION
@@ -30,7 +30,7 @@ void test_social_mirroring() {
 
     // LEAD peer at phase 90
     uint8_t mac[6] = {0, 0, 0, 0, 0, 0}; // macSum % 3 = 0 (LEAD)
-    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 90);
+    updateEnsemblePeer(mac, 0, 100, 0, 0, 0.0, 0.0, 0, false, 0, 0, 90, false);
 
     // Build confidence for mirroring
     EVContext ctx = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};

@@ -22,7 +22,7 @@ void test_meritocratic_role_takeover() {
     // macSum for {0,0,0,0,0,0} is 0. ROLE = 0 (LEAD).
 
     uint8_t leadMac[6] = {0, 0, 0, 0, 0, 0};
-    updateEnsemblePeer(leadMac, 0, 100, 100, 0, 0.0, 0.0, 0, false, 0, 100, 0); // High dissonance/clash
+    updateEnsemblePeer(leadMac, 0, 100, 100, 0, 0.0, 0.0, 0, false, 0, 100, 0, false); // High dissonance/clash
 
     EVContext ctx = {0, 0, 0, 0, 0, 0, 12, 0.0, 0.0};
 

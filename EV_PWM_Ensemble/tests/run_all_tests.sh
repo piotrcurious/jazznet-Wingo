@@ -12,4 +12,8 @@ echo "Running all EV-PWM Ensemble & Awareness Tests..."
 ./tests/test_synchronization
 ./tests/test_role_dynamics
 ./tests/test_collective_intelligence
-echo "All 11 test suites passed successfully!"
+./tests/test_communication_awareness
+./tests/test_dialogue_mode
+./tests/test_auditory_masking
+./tests/test_inhibitory_awareness
+echo "All 15 test suites passed successfully!"

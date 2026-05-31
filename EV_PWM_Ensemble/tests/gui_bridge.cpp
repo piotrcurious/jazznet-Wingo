@@ -67,7 +67,8 @@ int main(int argc, char** argv) {
                                 int mood = (parts.size() >= 9) ? std::stoi(parts[8]) : 0;
                                 int clash = (parts.size() >= 10) ? std::stoi(parts[9]) : 0;
                                 int phase = (parts.size() >= 11) ? std::stoi(parts[10]) : 0;
-                                updateEnsemblePeer(mac, chord, intensity, diss, speed, lat, lon, key, list, mood, clash, phase);
+                                bool solo = (parts.size() >= 12) ? std::stoi(parts[11]) : false;
+                                updateEnsemblePeer(mac, chord, intensity, diss, speed, lat, lon, key, list, mood, clash, phase, solo);
                             }
                         }
                     }
